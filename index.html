@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bookstory</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div class="container">
+
+      <!-- LOGIN VIEW -->
+      <div id="loginView">
+        <h1>Bookstory</h1>
+        <p class="subtitle">Connect to your Audiobookshelf server</p>
+
+        <label for="server">Server address</label>
+        <input id="server" type="text" />
+
+        <label for="username">Username</label>
+        <input id="username" type="text" />
+
+        <label for="password">Password</label>
+        <input id="password" type="password" />
+
+        <button id="loginBtn">Sign in</button>
+        <div id="loginMsg" class="msg"></div>
+      </div>
+
+    </div>
+
+    <!-- HOME VIEW -->
+    <div id="homeView" style="display:none;">
+
+      <!-- TOP BAR (full width) -->
+      <div class="topbar">
+        <div>
+          <h1>Bookstory</h1>
+          <div id="whoami" class="subtitle">Signed in</div>
+        </div>
+        <div class="actions">
+          <button id="refreshBtn">Refresh</button>
+          <button id="logoutBtn">Log out</button>
+        </div>
+      </div>
+
+      <!-- CONTENT ROW -->
+      <div class="contentRow">
+
+        <!-- SIDEBAR -->
+        <aside id="sidebar">
+          <h3>Library</h3>
+          <select id="librarySelect" size="8"></select>
+
+          <h3>Sort</h3>
+          <select id="sortSelect">
+            <option value="recent">Recently added</option>
+            <option value="az">A → Z</option>
+            <option value="za">Z → A</option>
+          </select>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <main id="mainContent">
+          <section id="continueSection">
+            <h2>Continue Listening</h2>
+            <div id="continueList" class="list"></div>
+            <div id="continueEmpty" class="hint" style="display:none;">
+              Nothing in progress yet.
+            </div>
+          </section>
+
+          <div id="libraryItemsView"></div>
+          <div id="itemDetailView" style="display:none;"></div>
+          <div id="homeMsg" class="msg"></div>
+        </main>
+
+      </div>
+    </div>
+
+    <audio id="player" controls preload="metadata" style="width:100%; display:none;"></audio>
+  </body>
+</html>
