@@ -1,0 +1,323 @@
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+}
+
+/* ===============================
+ *  Base containers
+ *  =============================== */
+
+.container {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.subtitle {
+  opacity: 0.8;
+  margin-top: -8px;
+}
+
+label {
+  display: block;
+  margin: 14px 0 6px;
+  font-weight: 600;
+}
+
+input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(127,127,127,.35);
+  background: transparent;
+}
+
+button {
+  margin-top: 16px;
+  padding: 10px 14px;
+  font-size: 16px;
+  border-radius: 10px;
+  border: 0;
+  cursor: pointer;
+}
+
+.hint {
+  opacity: 0.8;
+  margin-top: 14px;
+  font-size: 14px;
+}
+
+.msg {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.msg.error { color: #b00020; }
+.msg.ok { color: #0b6b2e; }
+
+/* ===============================
+ *  Top bar
+ *  =============================== */
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  position: relative;
+  z-index: 10;
+  -webkit-app-region: drag;
+}
+
+.topbar button {
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ===============================
+ *  Sections & lists
+ *  =============================== */
+
+section {
+  margin-top: 22px;
+  overflow: visible;
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+/* ===============================
+ *  Cards
+ *  =============================== */
+
+.card {
+  padding: 12px;
+  border: 1px solid rgba(127,127,127,.25);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.card-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.card-sub {
+  opacity: 0.8;
+  font-size: 13px;
+}
+
+/* ===============================
+ *  Book grid
+ *  =============================== */
+
+#libraryItemsView.grid {
+display: grid;
+grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+gap: 14px;
+margin-top: 12px;
+width: 100%;
+}
+
+/* ===============================
+ *  Book cards
+ *  =============================== */
+
+.book-card {
+  cursor: pointer;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(127,127,127,.25);
+  background: rgba(127,127,127,.06);
+}
+
+.book-card:hover {
+  border-color: rgba(127,127,127,.45);
+}
+
+.book-cover {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+  background: rgba(127,127,127,.15);
+}
+
+.book-meta {
+  padding: 10px;
+}
+
+.book-title {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+
+.book-sub {
+  opacity: 0.75;
+  font-size: 12px;
+  margin: 0;
+}
+
+.book-card,
+.book-card * {
+  pointer-events: auto !important;
+}
+
+.book-card:active {
+  transform: scale(0.98);
+}
+
+/* ===============================
+ *  Layout & sidebar
+ *  =============================== */
+
+.layout {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  height: 100%;
+  width: 100vw;
+}
+
+#sidebar {
+padding: 14px;
+border-right: 1px solid rgba(127,127,127,.25);
+background: rgba(0,0,0,.15);
+}
+
+#sidebar h3 {
+margin: 12px 0 6px;
+font-size: 13px;
+opacity: .7;
+text-transform: uppercase;
+}
+
+#sidebar select {
+width: 100%;
+margin-top: 6px;
+}
+
+.contentRow {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  height: 100%;
+}
+
+#mainContent {
+min-width: 0;
+}
+
+/* ===============================
+ *  Login / home view safety
+ *  =============================== */
+
+#loginView,
+#loginView * {
+pointer-events: auto;
+}
+
+#homeView[style*="display:none"] {
+pointer-events: none;
+}
+
+#loginView {
+position: relative;
+z-index: 10;
+max-width: 560px;
+margin: 48px auto;
+padding: 24px;
+}
+
+#homeView {
+position: relative;
+z-index: 1;
+max-width: none;
+}
+
+/* ===============================
+ *  Continue Listening
+ *  =============================== */
+
+#continueList {
+display: flex !important;
+gap: 14px;
+overflow-x: auto;
+min-height: 220px;
+align-items: stretch;
+box-sizing: border-box;
+}
+
+.continue-card {
+  flex: 0 0 160px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------------- Progressbar ---------------- */
+.progress-wrap {
+  width: 80%;               /* Begränsar bredden */
+  height: 8px;              /* Höjd på baren */
+  background-color: #ddd;   /* Bakgrund för "tom bar" */
+  border-radius: 4px;       /* Rundade hörn */
+  overflow: hidden;          /* Så att inner bar rundas */
+  margin: 6px auto;         /* Centrerar baren */
+}
+
+.progress-bar {
+  height: 100%;
+  background-color: #4caf50; /* Fyllningsfärg */
+  width: 0%;                 /* Startvärde, uppdateras av JS */
+  transition: width 0.3s ease; /* Smooth fyllning */
+  border-radius: 4px 0 0 4px;  /* Rundade ändar på vänster */
+}
+
+/* Fyll redan från 5% */
+.progress-bar[data-pct]:not([data-pct="0"]) {
+  min-width: 5%;
+}
+
+/* När baren är full */
+.progress-bar.full {
+  border-radius: 4px; /* Rundade ändar på båda sidor */
+}
+
+/* =================================================
+ *  Book cards with progress (Continue Listening)
+ * ================================================= */
+
+#continueList .continue-card .progress-wrap {
+width: 100%;
+margin: 6px 0 10px;
+}
+
+#continueList .continue-card .progress-bar {
+width: 0%;
+}
+
+/* ===============================
+ *  Other minor tweaks
+ *  =============================== */
+
+#continueEmpty {
+font-size: 14px;
+opacity: 0.8;
+margin-top: 14px;
+}
