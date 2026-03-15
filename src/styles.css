@@ -273,20 +273,24 @@ box-sizing: border-box;
 
 /* ---------------- Progressbar ---------------- */
 .progress-wrap {
-  width: 80%;               /* Begränsar bredden */
-  height: 8px;              /* Höjd på baren */
-  background-color: #ddd;   /* Bakgrund för "tom bar" */
-  border-radius: 4px;       /* Rundade hörn */
-  overflow: hidden;          /* Så att inner bar rundas */
-  margin: 6px auto;         /* Centrerar baren */
+  width: 100%;
+  height: 8px;
+  background-color: #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 6px 0;
 }
 
 .progress-bar {
   height: 100%;
-  background-color: #4caf50; /* Fyllningsfärg */
-  width: 0%;                 /* Startvärde, uppdateras av JS */
-  transition: width 0.3s ease; /* Smooth fyllning */
-  border-radius: 4px 0 0 4px;  /* Rundade ändar på vänster */
+  background-color: #4caf50;
+  width: 0%;
+  transition: width 0.3s ease;
+  border-radius: 4px 0 0 4px;
+}
+
+.progress-wrap:hover {
+  filter: brightness(1.2);
 }
 
 /* Fyll redan från 5% */
@@ -320,4 +324,228 @@ width: 0%;
 font-size: 14px;
 opacity: 0.8;
 margin-top: 14px;
+}
+
+/* ===== DETAIL VIEW FIX ===== */
+
+
+#itemDetailView #detailHeader {
+display: flex;
+gap: 16px;
+align-items: flex-start;
+}
+
+#itemDetailView #detailDescription {
+margin-top: 18px;
+line-height: 1.5;
+white-space: pre-wrap;
+}
+
+#itemDetailView .progress-wrap {
+width: 100%;
+margin: 18px 0 0 0;
+}
+
+.detail-layout{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+
+.detail-meta{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.detail-title{
+  font-weight:800;
+}
+
+.detail-author{
+  opacity:.8;
+}
+
+.detail-duration{
+  opacity:.6;
+  font-size:13px;
+}
+
+.detail-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.detail-actions button{
+  width:auto;
+  margin-top:0;
+  padding:8px 12px;
+  font-size:14px;
+}
+
+
+
+
+.now-playing{
+  position:fixed;
+  inset:0;
+  background:#111;
+  z-index:1000;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  padding:20px;
+}
+
+.now-playing img{
+  width:260px;
+  border-radius:16px;
+  margin-top:40px;
+}
+
+#npTitle{
+margin-top:20px;
+font-size:20px;
+font-weight:800;
+text-align:center;
+}
+
+#npAuthor{
+opacity:.7;
+margin-bottom:20px;
+}
+
+#npSeek{
+width:90%;
+margin-top:20px;
+}
+
+.np-controls{
+  margin-top:20px;
+  display:flex;
+  gap:20px;
+}
+
+#closeNowPlaying{
+position:absolute;
+top:20px;
+left:20px;
+}
+
+#miniPlayer {
+pointer-events: auto;
+}
+
+#miniPlayer * {
+pointer-events: auto;
+}
+
+/* ========= MINI PLAYER CLEAN ========= */
+
+#miniPlayer{
+position:fixed;
+bottom:0;
+left:0;
+right:0;
+height:145px;
+background:#111;
+display:flex;
+gap:12px;
+padding:10px 32px 10px 14px;
+z-index:999;
+border-top:1px solid rgba(255,255,255,.1);
+align-items:center;
+}
+
+#miniCover{
+width:70px;
+height:70px;
+object-fit:cover;
+border-radius:8px;
+}
+
+#miniInfo{
+flex:1;
+display:flex;
+flex-direction:column;
+min-width:0;
+height:100%;
+}
+
+#miniTitle{
+font-weight:700;
+font-size:14px;
+white-space:nowrap;
+overflow:hidden;
+text-overflow:ellipsis;
+}
+
+#miniAuthor{
+font-size:12px;
+opacity:.7;
+margin-bottom:4px;
+}
+
+#miniProgressWrap{
+width:100%;
+height:8px;
+background:#333;
+border-radius:4px;
+overflow:hidden;
+margin:4px 0;
+cursor:pointer;
+}
+
+#miniProgressBar{
+height:100%;
+width:0%;
+background:#4caf50;
+}
+
+#miniTimeRow{
+display:flex;
+justify-content:space-between;
+font-size:11px;
+opacity:.7;
+margin-bottom:4px;
+}
+
+#miniControls{
+position:relative;
+display:flex;
+align-items:center;
+width:100%;
+margin-top:6px;
+height:32px;
+padding-right:18px;
+}
+
+#miniButtons{
+position:absolute;
+left:50%;
+transform:translateX(-50%);
+display:flex;
+gap:14px;
+}
+
+#miniVolumeWrap{
+margin-left:auto;
+}
+
+#miniVolume{
+width:140px;
+}
+
+#player{
+display:none !important;
+}
+
+#miniVolume{
+padding:0;
+}
+
+#miniVolume::-webkit-slider-runnable-track{
+margin-right:-7px;
+margin-left:-7px;
 }

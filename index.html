@@ -80,6 +80,64 @@
       </div>
     </div>
 
-    <audio id="player" controls preload="metadata" style="width:100%; display:none;"></audio>
+    <audio id="player" preload="metadata"></audio>
+    <div id="miniPlayer" class="mini-root" style="display:none">
+
+  <img id="miniCover">
+
+  <div id="miniInfo" class="mini-click">
+
+    <div id="miniTitle"></div>
+    <div id="miniAuthor"></div>
+
+    <div id="miniProgressWrap">
+      <div id="miniProgressBar"></div>
+    </div>
+
+    <div id="miniTimeRow">
+      <span id="miniCurrent">0:00</span>
+      <span id="miniTotal">0:00</span>
+    </div>
+
+    <div id="miniControls">
+
+  <div id="miniButtons">
+      <button id="miniPrevChapter">⏮</button>
+      <button id="miniPlayPause">▶</button>
+      <button id="miniNextChapter">⏭</button>
+      <button id="openNowPlaying">▲</button>
+  </div>
+
+  <div id="miniVolumeWrap">
+      <input id="miniVolume" type="range" min="0" max="1" step="0.01" value="1">
+  </div>
+
+</div>
+
+
+  </div>
+
+</div>
+
+
+<div id="nowPlayingView" class="now-playing" style="display:none">
+
+  <button id="closeNowPlaying">↓</button>
+
+  <img id="npCover" />
+
+  <div id="npTitle"></div>
+  <div id="npAuthor"></div>
+
+  <input id="npSeek" type="range" min="0" max="100" value="0" />
+
+  <div class="np-controls">
+  <button id="npBack">⏪</button>
+  <button id="npPlayPause">▶</button>
+  <button id="npForward">⏩</button>
+  <button id="npNextChapter">⏭</button>
+</div>
+
+</div>
   </body>
 </html>

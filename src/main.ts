@@ -10,12 +10,43 @@ let playerItemId: string | null = null;
 let currentLibraryId: string | null = null;
 let lastInProgress: any = null;
 let forcedSeekTime: number | null = null;
+let lastSessionSync = 0
+let lastProgressSave = 0
+let currentSessionId: string | null = null
 const progressByItemId = new Map<string, { currentTime: number; progress?: number }>();
 let currentLibraryItemIds = new Set<string>();
 let currentLibraryItems: any[] = [];
 const durationByItemId = new Map<string, number>();
 
+const preloadAudio = new Audio()
+preloadAudio.preload = "auto"
+
 /* ---------------- Duration helpers ---------------- */
+function formatTotalDuration(sec: number) {
+
+  sec = Math.floor(sec || 0)
+
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+
+  if (h > 0) return `${h}h ${m}m`
+    return `${m}m`
+}
+
+function fmtTime(sec:number){
+
+  sec = Math.floor(sec || 0)
+
+  const h = Math.floor(sec/3600)
+  const m = Math.floor((sec%3600)/60)
+  const s = sec%60
+
+  if(h>0)
+    return `${h}:${m.toString().padStart(2,"0")}:${s.toString().padStart(2,"0")}`
+
+    return `${m}:${s.toString().padStart(2,"0")}`
+}
+
 function sumDurationsFromItem(item: any): number {
   const af = item?.media?.audioFiles;
   if (Array.isArray(af) && af.length) {
@@ -80,6 +111,16 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 function show(node: HTMLElement, on: boolean) { node.style.display = on ? "" : "none"; }
+function showMiniPlayer(title:string, author:string, cover:string){
+
+  el("miniPlayer").style.display = ""
+
+  el("miniTitle").textContent = title
+  el("miniAuthor").textContent = author
+
+  const img = el<HTMLImageElement>("miniCover")
+  img.src = cover
+}
 
 function setMsg(id: string, text: string, type: "ok" | "error" | "none" = "none") {
   const m = el<HTMLDivElement>(id);
@@ -123,15 +164,89 @@ async function logOut(serverUrl: string, username: string) {
 document.addEventListener("click", async (e) => {
   const t = e.target as HTMLElement | null;
   if (!t) return;
-  const btn = t.closest("button") as HTMLButtonElement | null;
-  const id = btn?.id ?? t.id;
+  const clickable = t.closest("[id]") as HTMLElement | null;
+  const id = clickable?.id;
   try {
     if (id === "loginBtn") await handleLogin();
     if (id === "logoutBtn") await handleLogout();
     if (id === "refreshBtn") await loadHome();
     if (id === "backBtn") backFromDetail();
-    if (id === "resumeBtn" && currentItemId)
-      await playChapter(currentItemId, currentChapterIndex);
+    if (id === "resumeBtn" && currentItemId) {
+
+      const progress = progressByItemId.get(currentItemId)
+      const serverTime = progress?.currentTime || 0
+
+      console.log("RESUME TIME =", serverTime)
+
+      // säkerställ att filer finns
+      if (!currentFiles.length) {
+        await showItemDetail(currentItemId)
+      }
+
+      const pos = getChapterIndexFromTime(serverTime)
+
+      forcedSeekTime = pos.offset
+
+        await playChapter(currentItemId, pos.index)
+    }
+
+    if (id === "openNowPlaying") {
+      show(el("nowPlayingView"), true)
+    }
+
+
+
+    if (id === "miniPlayer") {
+      show(el("nowPlayingView"), true);
+    }
+
+    if (id === "miniPlayPause") {
+
+      const audio = el<HTMLAudioElement>("player")
+      const btn = el("miniPlayPause")
+
+      if (audio.paused) {
+        audio.play()
+        btn.textContent = "⏸"
+      } else {
+        audio.pause()
+        btn.textContent = "▶"
+      }
+    }
+
+    if (id === "miniNextChapter" && currentItemId) {
+
+      const next = currentChapterIndex + 1
+
+      if (next < currentFiles.length) {
+        playChapter(currentItemId, next)
+      }
+    }
+
+    if (id === "miniPrevChapter" && currentItemId) {
+
+      const audio = el<HTMLAudioElement>("player")
+
+      // ⭐ om man är mitt i kapitel → hoppa till start
+      if (audio.currentTime > 5) {
+        audio.currentTime = 0
+        return
+      }
+
+      const prev = currentChapterIndex - 1
+
+      if (prev >= 0) {
+        playChapter(currentItemId, prev)
+      }
+    }
+
+    if (id === "closeNowPlaying") {
+      show(el("nowPlayingView"), false)
+    }
+
+
+
+
   } catch (err: any) {
     setMsg("homeMsg", String(err?.message ?? err), "error");
   }
@@ -164,7 +279,11 @@ async function handleLogout() {
 }
 
 /* ---------------- Navigation ---------------- */
-function backFromDetail() {
+async function backFromDetail() {
+
+  await forceSaveProgress()
+  await stopPlaybackSession()
+
   setContinueVisible(true);
   show(el("itemDetailView"), false);
   show(el("libraryItemsView"), true);
@@ -179,10 +298,17 @@ function setContinueVisible(showIt: boolean) {
 /* ---------------- Progress helpers ---------------- */
 function extractInProgressArray(inProgress: any): any[] {
   if (!inProgress) return [];
-  if (Array.isArray(inProgress.libraryItems)) return inProgress.libraryItems;
-  if (Array.isArray(inProgress.items)) return inProgress.items;
-  if (Array.isArray(inProgress.results)) return inProgress.results;
-  return [];
+
+  if (Array.isArray(inProgress.sessions))
+    return inProgress.sessions
+
+    if (Array.isArray(inProgress.libraryItems))
+      return inProgress.libraryItems
+
+      if (Array.isArray(inProgress.items))
+        return inProgress.items
+
+        return []
 }
 
 function getItemId(p: any): string | null {
@@ -305,6 +431,7 @@ async function renderContinueListening(inProgress: any) {
   const { serverUrl, username } = getSaved();
 
   for (const p of filteredProgress.slice(0, 10)) {
+    console.log("INPROGRESS OBJECT =", p)
     const itemId = getItemId(p);
     if (!itemId) continue;
 
@@ -375,8 +502,17 @@ async function renderContinueListening(inProgress: any) {
     })();
 
     card.onclick = async () => {
-      await showItemDetail(itemId);
-      await playChapter(itemId, 0);
+
+      const progress = progressByItemId.get(itemId)
+      const serverTime = progress?.currentTime || 0
+
+      await showItemDetail(itemId)
+
+      const pos = getChapterIndexFromTime(serverTime)
+
+      forcedSeekTime = pos.offset
+
+        await playChapter(itemId, pos.index)
     };
   }
 }
@@ -413,6 +549,7 @@ async function renderLibraryGrid() {
 
     const title = it?.media?.metadata?.title ?? "Item";
     const author = it?.media?.metadata?.authorName ?? "";
+    const duration = sumDurationsFromItem(it)
 
     const card = document.createElement("div");
     card.className = "book-card";
@@ -423,14 +560,51 @@ async function renderLibraryGrid() {
 
     const meta = document.createElement("div");
     meta.className = "book-meta";
-    meta.innerHTML = `<p class="book-title"></p><p class="book-sub"></p>`;
-    (meta.firstChild as HTMLElement).textContent = title;
-    (meta.lastChild as HTMLElement).textContent = author;
+
+    meta.innerHTML =
+    `
+    <p class="book-title"></p>
+    <p class="book-sub"></p>
+    <p class="book-time"></p>
+    `;
+
+    (meta.children[0] as HTMLElement).textContent = title;
+    (meta.children[1] as HTMLElement).textContent = author;
+    (meta.children[2] as HTMLElement).textContent =
+    formatTotalDuration(duration);
 
     card.append(img, meta);
     card.onclick = () => showItemDetail(String(itemId));
     container.appendChild(card);
   }
+}
+
+const progressWrap = document.getElementById("miniProgressWrap")
+
+if (progressWrap) {
+
+  progressWrap.addEventListener("click", (e) => {
+
+    const audio = document.getElementById("player") as HTMLAudioElement
+    if (!audio || !currentItemId) return
+
+      const rect = progressWrap.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const pct = x / rect.width
+
+      const total =
+      sumDurationsFromItem({
+        media: { audioFiles: currentFiles }
+      })
+
+      const target = total * pct
+
+      const pos = getChapterIndexFromTime(target)
+
+      forcedSeekTime = pos.offset
+
+        playChapter(currentItemId, pos.index)
+  })
 }
 
 /* ---------------- Detail / audio ---------------- */
@@ -456,19 +630,33 @@ async function showItemDetail(itemId: string) {
   const detail = el<HTMLDivElement>("itemDetailView");
   detail.innerHTML = `
   <div class="card">
+  <div class="detail-layout">
+
+  <div class="detail-actions">
   <button id="backBtn">← Back</button>
   <button id="resumeBtn">${playLabel}</button>
-  <div id="detailHeader" style="display:flex; gap:14px; margin-top:10px; align-items:flex-start;">
-  <div style="min-width:0;">
-  <div style="font-weight:800;">${escapeHtml(title)}</div>
-  <div style="opacity:.8;">${escapeHtml(author)}</div>
   </div>
-  </div>
-  <div style="margin-top:12px;">${escapeHtml(desc)}</div>
 
-  <!-- Ny detaljvy progressbar -->
-  <div class="progress-wrap" style="margin-top:10px;">
+  <div id="detailHeader">
+  <img id="detailCover" />
+
+  <div class="detail-meta">
+  <div class="detail-title">${escapeHtml(title)}</div>
+  <div class="detail-author">${escapeHtml(author)}</div>
+  <div class="detail-duration">
+  ${formatTotalDuration(sumDurationsFromItem(item))}
+  </div>
+  </div>
+  </div>
+
+  <div id="detailDescription">
+  ${escapeHtml(desc)}
+  </div>
+
+  <div class="progress-wrap">
   <div id="itemDetailProgressBar" class="progress-bar"></div>
+  </div>
+
   </div>
   </div>
   `;
@@ -501,6 +689,30 @@ async function showItemDetail(itemId: string) {
   .sort((a: any, b: any) => (a?.index ?? 0) - (b?.index ?? 0));
 
   currentFiles = files;
+  // 🔥 PREBUFFER RESUME CHAPTER
+
+  try {
+
+    const progress =
+    progressByItemId.get(itemId)?.currentTime || 0
+
+    const pos = getChapterIndexFromTime(progress)
+
+    const { serverUrl, username } = getSaved()
+
+    const nextUrl = await invoke("abs_local_player_url", {
+      libraryId: itemId,
+      index: currentFiles[pos.index].ino
+    })
+
+    preloadAudio.src = nextUrl
+
+    console.log("PREBUFFER RESUME CHAPTER", pos.index)
+
+  } catch (e) {
+    console.log("resume prebuffer fail", e)
+  }
+
   currentChapterIndex = 0;
 
   function fmt(sec: number) {
@@ -561,6 +773,34 @@ async function showItemDetail(itemId: string) {
 
   detail.querySelector(".card")?.appendChild(list);
   // ===== END TRACKLIST =====
+  // ===== preload resume progress =====
+
+  try {
+
+    const duration = sumDurationsFromItem(item)
+
+    const currentTime =
+    progressByItemId.get(itemId)?.currentTime
+    || getCurrentTimeForProgress(item, null)
+    || 0
+
+    const pct =
+    duration > 0
+    ? Math.round((currentTime / duration) * 100)
+    : 0
+
+    const bar =
+    document.getElementById("itemDetailProgressBar")
+
+    if (bar) {
+      bar.style.width = pct + "%"
+    }
+
+    console.log("DETAIL PROGRESS", currentTime, duration, pct)
+
+  } catch (e) {
+    console.log("detail progress preload fail", e)
+  }
 }
 
 function getChapterStart(index: number) {
@@ -581,6 +821,30 @@ function getChapterStart(index: number) {
   }
 
   return sum;
+}
+
+function getChapterIndexFromTime(time: number): { index: number, offset: number } {
+
+  let sum = 0
+
+  for (let i = 0; i < currentFiles.length; i++) {
+
+    const dur = currentFiles[i]?.duration || 0
+
+    if (time < sum + dur) {
+      return {
+        index: i,
+        offset: time - sum
+      }
+    }
+
+    sum += dur
+  }
+
+  return {
+    index: 0,
+    offset: 0
+  }
 }
 
 async function playChapter(itemId: string, index: number) {
@@ -613,6 +877,21 @@ async function playChapter(itemId: string, index: number) {
 
     audio.pause();
     audio.src = url;
+    audio.preload = "auto"
+    audio.load()
+
+    audio.onloadedmetadata = () => {
+
+      if (forcedSeekTime !== null) {
+
+        console.log("SEEK TO", forcedSeekTime)
+
+        audio.currentTime = forcedSeekTime
+        forcedSeekTime = null
+
+      }
+
+    }
 
     audio.onended = async () => {
       const next = index + 1;
@@ -621,51 +900,271 @@ async function playChapter(itemId: string, index: number) {
       }
     };
 
-    await audio.play();
+    audio.play().catch(() => {});
+    const btn = document.getElementById("miniPlayPause")
+    if (btn) btn.textContent = "⏸"
+    try{
 
+      const item = await invoke<any>("abs_get_item",{serverUrl,username,itemId})
+
+      const title = item?.media?.metadata?.title || ""
+      const author = item?.media?.metadata?.authorName || ""
+
+      const cover = await invoke<string>("abs_get_cover_url",{serverUrl,username,itemId})
+
+      showMiniPlayer(title,author,cover)
+
+    }catch{}
+    // 🔥 preload nästa kapitel
+    try {
+
+      const next = index + 1
+
+      if (next < currentFiles.length) {
+
+        const nextIno = currentFiles[next].ino
+
+        const nextUrl = await invoke("abs_local_player_url", {
+          libraryId: itemId,
+          index: nextIno
+        })
+
+        preloadAudio.src = nextUrl
+
+        console.log("PRELOAD NEXT =", next)
+
+      }
+
+    } catch (e) {
+      console.log("preload fail", e)
+    }
+    // 🔥 refresha Continue efter playback start
+    setTimeout(async () => {
+
+      try {
+
+        const { serverUrl, username } = getSaved()
+
+        lastInProgress =
+        await invoke("abs_get_items_in_progress", {
+          serverUrl,
+          username
+        })
+
+        await renderContinueListening(lastInProgress)
+
+        console.log("Continue refresh after play")
+
+      } catch {}
+
+    }, 1500)
+
+    audio.onpause = () => {
+
+      const btn = document.getElementById("miniPlayPause")
+      if (btn) btn.textContent = "▶"
+
+        forceSaveProgress()
+          stopPlaybackSession()
+    }
+
+    // starta playback session
+    try {
+
+      const { serverUrl, username } = getSaved()
+
+      const playRes: any = await invoke("abs_start_playback", {
+        serverUrl,
+        username,
+        itemId
+      })
+
+      currentSessionId =
+      playRes?.id ||
+      playRes?.session?.id ||
+      null
+
+      console.log("SESSION ID =", currentSessionId)
+
+    } catch (e) {
+      console.log("session start fail", e)
+    }
+
+    audio.ontimeupdate = () => {
+
+      if (!currentItemId) return
+
+      // ⭐ MINI PLAYER TOTAL PROGRESS (lägg ALLTID först)
+      const miniBar = el("miniProgressBar")
+      const curLbl = el("miniCurrent")
+      const totLbl = el("miniTotal")
+
+      if (currentItemId) {
+
+        const total =
+        sumDurationsFromItem({
+          media: { audioFiles: currentFiles }
+        })
+
+        const absolute =
+        audio.currentTime + getChapterStart(currentChapterIndex)
+
+        const pct =
+        total > 0 ? absolute / total * 100 : 0
+
+        miniBar.style.width = pct + "%"
+
+        curLbl.textContent = fmtTime(absolute)
+        totLbl.textContent = fmtTime(total)
+      }
+
+
+        const now = Date.now()
+        const { serverUrl, username } = getSaved()
+
+        // LIVE session sync
+        if (currentSessionId && now - lastSessionSync > 5000) {
+          lastSessionSync = now
+
+          invoke("abs_sync_session", {
+            serverUrl,
+            username,
+            sessionId: currentSessionId,
+            currentTime: audio.currentTime
+          }).catch(console.error)
+        }
+
+        // RIKTIG resume save
+        if (now - lastProgressSave > 20000) {
+          lastProgressSave = now
+
+          invoke("abs_update_progress", {
+            serverUrl,
+            username,
+            itemId: currentItemId,
+            currentTime: audio.currentTime
+          }).catch(console.error)
+        }
+    }
+
+  } catch (e) {
+    console.log("playChapter fail", e)
   } finally {
-    isLoadingChapter = false;
+    isLoadingChapter = false
   }
+
 }
 
 /*
-async function playCurrentChapter(itemId: string) {
+ * async function playCurrentChapter(itemId: string) {
+ *
+ *  const { serverUrl, username } = getSaved();
+ *  await invoke("abs_set_active_user", { serverUrl, username });
+ *
+ *  const audio = el<HTMLAudioElement>("player");
+ *
+ *  const f = currentFiles[currentChapterIndex];
+ *  if (!f) return;
+ *
+ *  const url = await invoke<string>("abs_local_file_player_url", {
+ *    libraryItemId: itemId,
+ *    index: currentChapterIndex
+ *  });
+ *
+ *  console.log("CHAPTER URL:", url);
+ *
+ *  audio.pause();
+ *  audio.src = url;
+ *  audio.currentTime = 0;
+ *  audio.style.display = "";
+ *
+ *  audio.onended = async () => {
+ *    currentChapterIndex++;
+ *    if (currentChapterIndex < currentFiles.length) {
+ *      await playCurrentChapter(itemId);
+ *    }
+ *  };
+ *
+ *  await audio.play();
+ *
+ * }
+ */
 
-  const { serverUrl, username } = getSaved();
-  await invoke("abs_set_active_user", { serverUrl, username });
+async function forceSaveProgress() {
 
-  const audio = el<HTMLAudioElement>("player");
+  if (!currentItemId) return
 
-  const f = currentFiles[currentChapterIndex];
-  if (!f) return;
+    try {
 
-  const url = await invoke<string>("abs_local_file_player_url", {
-    libraryItemId: itemId,
-    index: currentChapterIndex
-  });
+      const audio = el<HTMLAudioElement>("player")
 
-  console.log("CHAPTER URL:", url);
+      const { serverUrl, username } = getSaved()
 
-  audio.pause();
-  audio.src = url;
-  audio.currentTime = 0;
-  audio.style.display = "";
+      await invoke("abs_update_progress", {
+        serverUrl,
+        username,
+        itemId: currentItemId,
+        currentTime: audio.currentTime
+      })
 
-  audio.onended = async () => {
-    currentChapterIndex++;
-    if (currentChapterIndex < currentFiles.length) {
-      await playCurrentChapter(itemId);
+      console.log("FORCE SAVE", audio.currentTime)
+
+      // ⭐ hämta ny Continue-data direkt från servern
+      const inProgress =
+      await invoke<any>("abs_get_items_in_progress", {
+        serverUrl,
+        username
+      })
+
+      lastInProgress = inProgress
+
+      // ⭐ rendera om Continue-listan
+      await renderContinueListening(lastInProgress)
+
+    } catch (e) {
+      console.log("force save fail", e)
     }
-  };
-
-  await audio.play();
-
 }
-*/
 
+async function stopPlaybackSession() {
+
+  if (!currentSessionId) return
+
+    try {
+
+      const { serverUrl, username } = getSaved()
+
+      await invoke("abs_stop_playback", {
+        serverUrl,
+        username,
+        sessionId: currentSessionId
+      })
+
+      console.log("SESSION STOPPED")
+
+      currentSessionId = null
+
+    } catch (e) {
+      console.log("stop session fail", e)
+    }
+}
 
 /* ---------------- Boot ---------------- */
 async function boot() {
+
+  const audio = el<HTMLAudioElement>("player")
+  audio.volume = 0.8
+
+  el<HTMLInputElement>("miniVolume").value = "0.8"
+
+  el<HTMLInputElement>("miniVolume").oninput = (e) => {
+
+    e.stopPropagation()
+
+    const audio = el<HTMLAudioElement>("player")
+    audio.volume = Number((e.target as HTMLInputElement).value)
+  }
+
   wireSortSelect();
   const saved = getSaved();
   if (saved.serverUrl && saved.username) {
@@ -681,5 +1180,11 @@ async function boot() {
   show(el("loginView"), true);
   show(el("homeView"), false);
 }
+
+window.addEventListener("beforeunload", () => {
+  forceSaveProgress()
+    stopPlaybackSession()
+})
+
 
 boot();
