@@ -58,60 +58,7 @@ fn get_token_from_keyring(server_url: &str, username: &str) -> Result<String, St
 
 /* -------------------- Local HTTP proxy -------------------- */
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PlayReq<'a> {
-    device_info: DeviceInfo<'a>,
-    supported_mime_types: Vec<&'a str>,
-    start_track_index: usize,
-}
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DeviceInfo<'a> {
-    client_version: &'a str,
-}
-
-fn first_content_url(play_json: &serde_json::Value) -> Option<String> {
-    if let Some(s) = play_json
-        .get("audioTracks")
-        .and_then(|x| x.get(0))
-        .and_then(|x| x.get("contentUrl"))
-        .and_then(|x| x.as_str())
-        {
-            return Some(s.to_string());
-        }
-
-        if let Some(s) = play_json
-            .get("session")
-            .and_then(|x| x.get("audioTracks"))
-            .and_then(|x| x.get(0))
-            .and_then(|x| x.get("contentUrl"))
-            .and_then(|x| x.as_str())
-            {
-                return Some(s.to_string());
-            }
-
-            None
-}
-
-fn absolutize(base_root: &str, url: &str) -> String {
-    if url.starts_with("http://") || url.starts_with("https://") {
-        url.to_string()
-    } else if url.starts_with('/') {
-        format!("{}{}", base_root.trim_end_matches('/'), url)
-    } else {
-        format!("{}/{}", base_root.trim_end_matches('/'), url)
-    }
-}
-
-fn ensure_token_in_url(url: &str, token: &str) -> String {
-    if url.contains("token=") {
-        return url.to_string();
-    }
-    let joiner = if url.contains('?') { "&" } else { "?" };
-    format!("{}{}token={}", url, joiner, token)
-}
 
 async fn audio_proxy(
     method: Method,
@@ -154,9 +101,8 @@ async fn audio_proxy(
         return Ok(response);
     }
 
-    let base_root = server_url.trim_end_matches('/').to_string();
-    let base_sub = format!("{}/audiobookshelf", base_root);
-    let base_variants = vec![base_root.clone(), base_sub];
+
+
 
     let client = reqwest::Client::new();
 
@@ -182,7 +128,7 @@ async fn audio_proxy(
         req = req.header(reqwest::header::RANGE, rng);
     }
 
-    let mut res = req
+    let res = req
     .send()
     .await
     .map_err(|_| StatusCode::BAD_GATEWAY)?;
@@ -474,10 +420,15 @@ async fn abs_get_item(server_url: String, username: String, item_id: String) -> 
 }
 
 #[tauri::command]
-async fn abs_get_items_in_progress(server_url: String, username: String) -> Result<serde_json::Value, String> {
+async fn abs_get_items_in_progress(
+    server_url: String,
+    username: String,
+) -> Result<serde_json::Value, String> {
+
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
-    let url = format!("{}/api/me/items-in-progress", server_url);
+
+    let url = format!("{}/api/me/listening-sessions", server_url);
 
     let resp = reqwest::Client::new()
     .get(url)
@@ -570,6 +521,45 @@ async fn abs_sync_session(server_url: String, username: String, session_id: Stri
 }
 
 #[tauri::command]
+async fn abs_update_progress(
+    server_url: String,
+    username: String,
+    item_id: String,
+    current_time: f64,
+) -> Result<(), String> {
+
+    let server_url = normalize_server_url(server_url);
+    let token = get_token_from_keyring(&server_url, &username)?;
+
+    let url = format!(
+        "{}/api/me/progress/{}",
+        server_url,
+        item_id
+    );
+
+    let body = serde_json::json!({
+        "currentTime": current_time
+    });
+
+    let resp = reqwest::Client::new()
+    .patch(url)
+    .header("Authorization", format!("Bearer {}", token))
+    .json(&body)
+    .send()
+    .await
+    .map_err(|e| format!("Network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "Progress update failed (HTTP {})",
+                           resp.status()
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn abs_build_authed_url(server_url: String, username: String, path: String) -> Result<String, String> {
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
@@ -637,6 +627,7 @@ pub fn run() {
         abs_get_cover_url,
         abs_start_playback,
         abs_sync_session,
+        abs_update_progress,
         abs_build_authed_url,
         abs_set_active_user,
         abs_local_player_url,
