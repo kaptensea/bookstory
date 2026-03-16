@@ -3,7 +3,7 @@
   <h1>Bookstory</h1>
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
-  ![Version](https://img.shields.io/badge/version-0.6.2-blue)
+  ![Version](https://img.shields.io/badge/version-0.6.3-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
   ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
   ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8D8)
@@ -51,6 +51,8 @@ npm run tauri build
 ## Releases
 
 Pre-built binaries for Linux and Windows are available on the [Releases](https://github.com/kaptensea/bookstory/releases) page.
+
+Bookstory is desktop-only (Linux and Windows).
 
 Pushing a tag like `v0.7.0` triggers the GitHub Actions workflow that builds and publishes release assets automatically.
 
