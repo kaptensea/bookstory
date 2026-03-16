@@ -5,7 +5,7 @@
 
   ![Version](https://img.shields.io/badge/version-0.6.2-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
-  ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey)
+  ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
   ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8D8)
 </div>
 
