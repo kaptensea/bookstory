@@ -5,6 +5,7 @@ type Json = any;
 let isLoadingChapter = false;
 let currentItemId: string | null = null;
 let currentFiles: any[] = [];
+let currentChapterRows: HTMLElement[] = [];
 let currentChapterIndex = 0;
 let playerItemId: string | null = null;
 let currentLibraryId: string | null = null;
@@ -31,6 +32,26 @@ function formatTotalDuration(sec: number) {
 
   if (h > 0) return `${h}h ${m}m`
     return `${m}m`
+}
+
+function highlightChapter(index: number) {
+
+  currentChapterRows.forEach((row, i) => {
+
+    if (i === index) {
+
+      row.style.background =
+      "rgba(255,255,255,0.08)"
+
+      row.style.borderRadius = "8px"
+
+    } else {
+
+      row.style.background = "transparent"
+
+    }
+
+  })
 }
 
 function fmtTime(sec:number){
@@ -406,46 +427,63 @@ function getCurrentTimeForProgress(item: any, inProgressObj: any): number {
 const intervalByItemId = new Map<string, number>();
 
 async function renderContinueListening(inProgress: any) {
+
   const listEl = el("continueList");
   const emptyEl = el("continueEmpty");
   listEl.innerHTML = "";
 
-  // Rensa alla gamla intervall
   intervalByItemId.forEach(id => clearInterval(id));
   intervalByItemId.clear();
 
   if (!currentLibraryItemIds.size) return;
 
-  const allProgress = extractInProgressArray(inProgress);
+  let allProgress: any[] = [];
+
+  if (Array.isArray(inProgress)) allProgress = inProgress;
+  else if (inProgress?.sessions) allProgress = inProgress.sessions;
+  else allProgress = extractInProgressArray(inProgress) || [];
+
   const filteredProgress = allProgress.filter(p => {
     const id = getItemId(p);
     return id ? currentLibraryItemIds.has(id) : false;
   });
 
   if (!filteredProgress.length) {
-    if (emptyEl) emptyEl.style.display = "";
+    emptyEl.style.display = "";
     return;
   }
-  if (emptyEl) emptyEl.style.display = "none";
+
+  emptyEl.style.display = "none";
 
   const { serverUrl, username } = getSaved();
 
   for (const p of filteredProgress.slice(0, 10)) {
-    console.log("INPROGRESS OBJECT =", p)
+
     const itemId = getItemId(p);
     if (!itemId) continue;
 
     const card = document.createElement("div");
     card.className = "book-card continue-card";
-    card.dataset.itemId = itemId;
+    listEl.appendChild(card);
 
-    const img = document.createElement("img");
-    img.className = "book-cover"; img.loading = "lazy"; img.alt = "Cover";
-    try { img.src = await invoke<string>("abs_get_cover_url", { serverUrl, username, itemId }); } catch {}
+    card.innerHTML = `
+    <div class="cover-wrap">
+    <img class="book-cover" loading="lazy">
+    <div class="progress-wrap">
+    <div class="progress-bar"></div>
+    </div>
+    </div>
 
-    const meta = document.createElement("div");
-    meta.className = "book-meta";
-    meta.innerHTML = `<p class="book-title"></p><p class="book-sub"></p>`;
+    <div class="book-meta">
+    <p class="book-title"></p>
+    <p class="book-sub"></p>
+    </div>
+    `;
+
+    const img = card.querySelector(".book-cover") as HTMLImageElement;
+    const bar = card.querySelector(".progress-bar") as HTMLDivElement;
+    const titleEl = card.querySelector(".book-title") as HTMLElement;
+    const authorEl = card.querySelector(".book-sub") as HTMLElement;
 
     let title = p?.title ?? itemId;
     let author = p?.author ?? "";
@@ -456,63 +494,60 @@ async function renderContinueListening(inProgress: any) {
       author = item?.media?.metadata?.authorName ?? author;
     } catch {}
 
-    (meta.firstChild as HTMLElement).textContent = title;
-    (meta.lastChild as HTMLElement).textContent = author;
+    titleEl.textContent = title;
+    authorEl.textContent = author;
 
-    const barWrap = document.createElement("div");
-    barWrap.className = "progress-wrap";
-    const bar = document.createElement("div");
-    bar.className = "progress-bar";
-    barWrap.appendChild(bar);
+    try {
+      img.src = await invoke<string>("abs_get_cover_url", { serverUrl, username, itemId });
+    } catch {}
 
-    card.append(img, meta, barWrap);
-    listEl.appendChild(card);
-
-    // Progress init
+    // progress init
     (async () => {
       try {
         const item = await invoke<any>("abs_get_item", { serverUrl, username, itemId });
         const duration = sumDurationsFromItem(item);
         let currentTime = getCurrentTimeForProgress(item, p);
+
         progressByItemId.set(itemId, { currentTime });
 
         let pct = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
         if (pct > 0 && pct < 5) pct = 5;
-        bar.style.width = `${pct}%`;
-        console.log(`Continue: "${title}" currentTime=${currentTime}s duration=${duration}s pct=${pct}%`);
 
-        // Realtidsuppdatering via setInterval
+        bar.style.width = pct + "%";
+
         const audio = el<HTMLAudioElement>("player");
+
         const intervalId = setInterval(() => {
           if (audio.src && !audio.paused && currentItemId === itemId) {
+
             const cur = audio.currentTime;
             progressByItemId.set(itemId, { currentTime: cur });
+
             let pct = duration > 0 ? Math.round((cur / duration) * 100) : 0;
             if (pct > 0 && pct < 5) pct = 5;
-            bar.style.width = `${pct}%`;
+
+            bar.style.width = pct + "%";
           }
         }, 500);
 
         intervalByItemId.set(itemId, intervalId);
 
-      } catch (err) {
+      } catch {
         bar.style.width = "0%";
-        console.error("Progressbar error:", err);
       }
     })();
 
     card.onclick = async () => {
 
-      const progress = progressByItemId.get(itemId)
-      const serverTime = progress?.currentTime || 0
+      const progress = progressByItemId.get(itemId);
+      const serverTime = progress?.currentTime || 0;
 
-      await showItemDetail(itemId)
+      await showItemDetail(itemId);
 
-      const pos = getChapterIndexFromTime(serverTime)
+      const pos = getChapterIndexFromTime(serverTime);
+      forcedSeekTime = pos.offset;
 
-      forcedSeekTime = pos.offset
-
-        await playChapter(itemId, pos.index)
+      await playChapter(itemId, pos.index);
     };
   }
 }
@@ -565,13 +600,10 @@ async function renderLibraryGrid() {
     `
     <p class="book-title"></p>
     <p class="book-sub"></p>
-    <p class="book-time"></p>
     `;
 
     (meta.children[0] as HTMLElement).textContent = title;
     (meta.children[1] as HTMLElement).textContent = author;
-    (meta.children[2] as HTMLElement).textContent =
-    formatTotalDuration(duration);
 
     card.append(img, meta);
     card.onclick = () => showItemDetail(String(itemId));
@@ -725,6 +757,7 @@ async function showItemDetail(itemId: string) {
   }
 
   const list = document.createElement("div");
+  const chapterRows: HTMLElement[] = []
   list.style.marginTop = "18px";
 
   const chapters =
@@ -749,6 +782,7 @@ async function showItemDetail(itemId: string) {
     console.log("FILES", files);
 
     const row = document.createElement("div");
+    chapterRows.push(row)
     row.style.display = "flex";
     row.style.justifyContent = "space-between";
     row.style.padding = "6px 0";
@@ -772,6 +806,7 @@ async function showItemDetail(itemId: string) {
   }
 
   detail.querySelector(".card")?.appendChild(list);
+  currentChapterRows = chapterRows
   // ===== END TRACKLIST =====
   // ===== preload resume progress =====
 
@@ -856,9 +891,19 @@ async function playChapter(itemId: string, index: number) {
 
     const { serverUrl, username } = getSaved();
     await invoke("abs_set_active_user", { serverUrl, username });
+    try {
+      await invoke("abs_trigger_play", {
+        serverUrl,
+        username,
+        itemId
+      })
+    } catch (e) {
+      console.log("play trigger fail", e)
+    }
 
     currentChapterIndex = index;
     currentItemId = itemId;
+    highlightChapter(index)
 
     const audio = el<HTMLAudioElement>("player");
     audio.style.display = "";
@@ -880,7 +925,7 @@ async function playChapter(itemId: string, index: number) {
     audio.preload = "auto"
     audio.load()
 
-    audio.onloadedmetadata = () => {
+    audio.onloadedmetadata = async () => {
 
       if (forcedSeekTime !== null) {
 
@@ -891,16 +936,15 @@ async function playChapter(itemId: string, index: number) {
 
       }
 
+      try {
+        await audio.play()
+        console.log("AUDIO STARTED")
+      } catch (e) {
+        console.log("AUDIO PLAY FAIL", e)
+      }
+
     }
 
-    audio.onended = async () => {
-      const next = index + 1;
-      if (next < currentFiles.length) {
-        await playChapter(itemId, next);
-      }
-    };
-
-    audio.play().catch(() => {});
     const btn = document.getElementById("miniPlayPause")
     if (btn) btn.textContent = "⏸"
     try{
@@ -959,13 +1003,75 @@ async function playChapter(itemId: string, index: number) {
 
     }, 1500)
 
-    audio.onpause = () => {
+    audio.onended = async () => {
+
+      console.log("CHAPTER ENDED")
+
+      const next = currentChapterIndex + 1
+
+      if (next < currentFiles.length) {
+
+        console.log("AUTO NEXT", next)
+
+        forcedSeekTime = 0
+          await playChapter(currentItemId!, next)
+
+      } else {
+
+        console.log("BOOK FINISHED")
+
+        await stopPlaybackSession()
+
+      }
+    }
+
+    audio.onpause = async () => {
 
       const btn = document.getElementById("miniPlayPause")
       if (btn) btn.textContent = "▶"
 
-        forceSaveProgress()
-          stopPlaybackSession()
+        const { serverUrl, username } = getSaved()
+        const audio = el<HTMLAudioElement>("player")
+
+        await forceSaveProgress()
+
+        if (currentSessionId) {
+
+          const absolute =
+          audio.currentTime + getChapterStart(currentChapterIndex)
+
+          await invoke("abs_sync_session", {
+            serverUrl,
+            username,
+            sessionId: currentSessionId,
+            currentTime: absolute
+          })
+
+          console.log("SYNC ON PAUSE")
+        }
+
+        // ⭐⭐⭐ NYTT — vänta innan Continue refresh ⭐⭐⭐
+        setTimeout(async () => {
+
+          try {
+
+            const { serverUrl, username } = getSaved()
+
+            lastInProgress =
+            await invoke("abs_get_items_in_progress", {
+              serverUrl,
+              username
+            })
+
+            await renderContinueListening(lastInProgress)
+
+            console.log("Continue refresh AFTER pause delay")
+
+          } catch (e) {
+            console.log("continue refresh fail", e)
+          }
+
+        }, 2000)
     }
 
     // starta playback session
@@ -985,6 +1091,40 @@ async function playChapter(itemId: string, index: number) {
       null
 
       console.log("SESSION ID =", currentSessionId)
+
+      // ⭐⭐⭐ LÄGG TILL DETTA ⭐⭐⭐
+      if (currentSessionId) {
+        await invoke("abs_sync_session", {
+          serverUrl,
+          username,
+          sessionId: currentSessionId,
+          currentTime: 0
+        })
+        console.log("SESSION FIRST SYNC")
+      }
+
+      // ⭐ INITIAL PROGRESS SAVE (gör så item hamnar i Continue)
+      setTimeout(async () => {
+
+        if (!currentItemId) return
+
+          const audio = el<HTMLAudioElement>("player")
+
+          const absolute =
+          audio.currentTime + getChapterStart(currentChapterIndex)
+
+          const { serverUrl, username } = getSaved()
+
+          await invoke("abs_update_progress", {
+            serverUrl,
+            username,
+            itemId: currentItemId,
+            currentTime: absolute
+          })
+
+          console.log("INITIAL PROGRESS SAVE")
+
+      }, 3000)
 
     } catch (e) {
       console.log("session start fail", e)
@@ -1023,14 +1163,17 @@ async function playChapter(itemId: string, index: number) {
         const { serverUrl, username } = getSaved()
 
         // LIVE session sync
-        if (currentSessionId && now - lastSessionSync > 5000) {
+        if (currentSessionId && now - lastSessionSync > 1000) {
           lastSessionSync = now
+
+          const absolute =
+          audio.currentTime + getChapterStart(currentChapterIndex)
 
           invoke("abs_sync_session", {
             serverUrl,
             username,
             sessionId: currentSessionId,
-            currentTime: audio.currentTime
+            currentTime: absolute
           }).catch(console.error)
         }
 
@@ -1038,11 +1181,14 @@ async function playChapter(itemId: string, index: number) {
         if (now - lastProgressSave > 20000) {
           lastProgressSave = now
 
+          const absolute =
+          audio.currentTime + getChapterStart(currentChapterIndex)
+
           invoke("abs_update_progress", {
             serverUrl,
             username,
             itemId: currentItemId,
-            currentTime: audio.currentTime
+            currentTime: absolute
           }).catch(console.error)
         }
     }
@@ -1100,11 +1246,14 @@ async function forceSaveProgress() {
 
       const { serverUrl, username } = getSaved()
 
+      const absolute =
+      audio.currentTime + getChapterStart(currentChapterIndex)
+
       await invoke("abs_update_progress", {
         serverUrl,
         username,
         itemId: currentItemId,
-        currentTime: audio.currentTime
+        currentTime: absolute
       })
 
       console.log("FORCE SAVE", audio.currentTime)
@@ -1183,7 +1332,7 @@ async function boot() {
 
 window.addEventListener("beforeunload", () => {
   forceSaveProgress()
-    stopPlaybackSession()
+  //  stopPlaybackSession()
 })
 
 

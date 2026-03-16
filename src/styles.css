@@ -128,12 +128,11 @@ h2 {
  *  Book grid
  *  =============================== */
 
-#libraryItemsView.grid {
-display: grid;
-grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-gap: 14px;
-margin-top: 12px;
-width: 100%;
+#libraryItemsView.grid{
+display:grid;
+grid-template-columns:repeat(auto-fill, minmax(190px, 1fr));
+gap:16px;
+margin-top:14px;
 }
 
 /* ===============================
@@ -161,14 +160,14 @@ width: 100%;
 }
 
 .book-meta {
-  padding: 10px;
+  padding: 8px 8px 10px;
 }
 
 .book-title {
   font-weight: 700;
   font-size: 13px;
   line-height: 1.2;
-  margin: 0 0 6px;
+  margin: 0 0 3px;
 }
 
 .book-sub {
@@ -271,46 +270,11 @@ box-sizing: border-box;
   flex-direction: column;
 }
 
-/* ---------------- Progressbar ---------------- */
-.progress-wrap {
-  width: 100%;
-  height: 8px;
-  background-color: #ddd;
-  border-radius: 4px;
-  overflow: hidden;
-  margin: 6px 0;
-}
-
-.progress-bar {
-  height: 100%;
-  background-color: #4caf50;
-  width: 0%;
-  transition: width 0.3s ease;
-  border-radius: 4px 0 0 4px;
-}
-
-.progress-wrap:hover {
-  filter: brightness(1.2);
-}
-
-/* Fyll redan från 5% */
-.progress-bar[data-pct]:not([data-pct="0"]) {
-  min-width: 5%;
-}
-
-/* När baren är full */
-.progress-bar.full {
-  border-radius: 4px; /* Rundade ändar på båda sidor */
-}
 
 /* =================================================
  *  Book cards with progress (Continue Listening)
  * ================================================= */
 
-#continueList .continue-card .progress-wrap {
-width: 100%;
-margin: 6px 0 10px;
-}
 
 #continueList .continue-card .progress-bar {
 width: 0%;
@@ -548,4 +512,137 @@ padding:0;
 #miniVolume::-webkit-slider-runnable-track{
 margin-right:-7px;
 margin-left:-7px;
+}
+
+/* Continue title clamp */
+.continue-card .book-title{
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  min-height:2.4em;   /* låser höjd = 2 rader */
+}
+
+.continue-card .book-meta{
+  display:flex;
+  flex-direction:column;
+  height:72px;
+}
+
+
+
+.book-cover{
+  display:block;
+}
+
+
+
+/* ===== Continue cover layout FIX ===== */
+
+
+.cover-wrap img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+
+/* progress overlay */
+
+.cover-wrap .progress-wrap{
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  height:5px;
+  background:rgba(0,0,0,.45);
+  margin:0;
+  z-index:2;
+}
+
+.cover-wrap .progress-bar{
+  height:100%;
+  background:#4caf50;
+  width:0%;
+}
+
+/* ===== FINAL Continue overlay FIX ===== */
+
+.continue-card{
+  overflow:visible;   /* viktigt */
+}
+
+.cover-wrap{
+  position:relative;
+  width:100%;
+  aspect-ratio:1/1;
+  border-radius:12px;
+  overflow:hidden;
+}
+
+.cover-wrap img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+
+.cover-wrap .progress-wrap{
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  height:4px;
+  background:rgba(0,0,0,.5);
+  z-index:5;
+}
+
+.cover-wrap .progress-bar{
+  height:100%;
+  background:#4caf50;
+  width:0%;
+}
+
+.cover-wrap::after{
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  height:40%;
+  background:linear-gradient(to top, rgba(0,0,0,.55), transparent);
+  pointer-events:none;
+}
+
+.book-card{
+  display:flex;
+  flex-direction:column;
+}
+
+#libraryItemsView .book-sub{
+margin-top:2px;
+}
+
+#libraryItemsView .book-title{
+display:-webkit-box;
+-webkit-line-clamp:2;
+-webkit-box-orient:vertical;
+overflow:hidden;
+text-overflow:ellipsis;
+min-height:2.4em;
+}
+
+
+#libraryItemsView .book-card:hover{
+transform:scale(1.025);
+box-shadow:0 10px 28px rgba(0,0,0,.35);
+z-index:2;
+}
+
+#libraryItemsView .book-card{
+transition: transform .18s ease, box-shadow .18s ease;
+will-change: transform;
+transform: translateZ(0);
+box-shadow: 0 2px 6px rgba(0,0,0,.18);
 }
