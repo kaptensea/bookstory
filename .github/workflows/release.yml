@@ -1,0 +1,44 @@
+name: Build Tauri App
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install dependencies
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install
+
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install linux deps
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt install -y libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: build tauri
+        run: npm run tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bookstory-${{ matrix.platform }}
+          path: src-tauri/target/release/bundle
