@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 type Json = any;
 
@@ -66,6 +67,47 @@ function startMiniTicker(){
 
     }, 500)
 
+}
+
+function getPlaybackTotals(audio: HTMLAudioElement) {
+  const isPodcast = currentFiles[0]?.audioFile !== undefined;
+
+  let total = 0;
+  let absolute = 0;
+
+  if (isPodcast) {
+    const currentFile = currentFiles[currentChapterIndex];
+    total = currentFile?.audioFile?.duration || 0;
+    if (total === 0 && audio.duration && isFinite(audio.duration)) total = audio.duration;
+    absolute = audio.currentTime;
+  } else {
+    total = sumDurationsFromItem({ media: { audioFiles: currentFiles } });
+    absolute = audio.currentTime + (getChapterStart(currentChapterIndex) || 0);
+  }
+
+  return { total, absolute };
+}
+
+function setPlaybackButtons(isPlaying: boolean) {
+  const icon = isPlaying ? "⏸" : "▶";
+  const miniBtn = document.getElementById("miniPlayPause");
+  const npBtn = document.getElementById("npPlayPause");
+  if (miniBtn) miniBtn.textContent = icon;
+  if (npBtn) npBtn.textContent = icon;
+}
+
+function syncNowPlayingProgress(audio: HTMLAudioElement) {
+  const seek = document.getElementById("npSeek") as HTMLInputElement | null;
+  const cur = document.getElementById("npCurrent");
+  const tot = document.getElementById("npTotal");
+  if (!seek) return;
+
+  const { total, absolute } = getPlaybackTotals(audio);
+  const pct = total > 0 ? (absolute / total) * 100 : 0;
+
+  seek.value = String(Math.max(0, Math.min(100, pct)));
+  if (cur) cur.textContent = fmtTime(absolute);
+  if (tot) tot.textContent = fmtTime(total);
 }
 /* ---------------- Duration helpers ---------------- */
 function formatTotalDuration(sec: number) {
@@ -172,8 +214,16 @@ function showMiniPlayer(title:string, author:string, cover:string){
   el("miniTitle").textContent = title
   el("miniAuthor").textContent = author
 
+  const npTitle = document.getElementById("npTitle")
+  const npAuthor = document.getElementById("npAuthor")
+  if (npTitle) npTitle.textContent = title
+  if (npAuthor) npAuthor.textContent = author
+
   const img = el<HTMLImageElement>("miniCover")
   img.src = cover
+
+  const npImg = document.getElementById("npCover") as HTMLImageElement | null
+  if (npImg) npImg.src = cover
 }
 
 function setMsg(id: string, text: string, type: "ok" | "error" | "none" = "none") {
@@ -223,8 +273,20 @@ document.addEventListener("click", async (e) => {
   try {
     if (id === "loginBtn") await handleLogin();
     if (id === "logoutBtn") await handleLogout();
-    if (id === "refreshBtn") await loadHome();
     if (id === "backBtn") backFromDetail();
+    if (id === "winMinBtn") {
+      try { await getCurrentWindow().minimize(); } catch (e) { console.log("win min fail", e) }
+    }
+    if (id === "winMaxBtn") {
+      try {
+        const w = getCurrentWindow();
+        if (await w.isMaximized()) await w.unmaximize();
+        else await w.maximize();
+      } catch (e) { console.log("win max fail", e) }
+    }
+    if (id === "winCloseBtn") {
+      try { await getCurrentWindow().close(); } catch (e) { console.log("win close fail", e) }
+    }
     if (id === "resumeBtn" && currentItemId) {
 
       const progress = progressByItemId.get(currentItemId)
@@ -244,25 +306,60 @@ document.addEventListener("click", async (e) => {
 
     if (id === "openNowPlaying") {
       show(el("nowPlayingView"), true)
+      const audio = el<HTMLAudioElement>("player")
+      syncNowPlayingProgress(audio)
+      setPlaybackButtons(!audio.paused)
     }
 
 
 
     if (id === "miniPlayer") {
       show(el("nowPlayingView"), true);
+      const audio = el<HTMLAudioElement>("player")
+      syncNowPlayingProgress(audio)
+      setPlaybackButtons(!audio.paused)
     }
 
     if (id === "miniPlayPause") {
 
       const audio = el<HTMLAudioElement>("player")
-      const btn = el("miniPlayPause")
 
       if (audio.paused) {
         audio.play()
-        btn.textContent = "⏸"
+        setPlaybackButtons(true)
       } else {
         audio.pause()
-        btn.textContent = "▶"
+        setPlaybackButtons(false)
+      }
+    }
+
+    if (id === "npPlayPause") {
+      const audio = el<HTMLAudioElement>("player")
+      if (audio.paused) {
+        audio.play()
+        setPlaybackButtons(true)
+      } else {
+        audio.pause()
+        setPlaybackButtons(false)
+      }
+    }
+
+    if (id === "npForward") {
+      const audio = el<HTMLAudioElement>("player")
+      audio.currentTime = Math.min((audio.duration || Infinity), audio.currentTime + 15)
+      syncNowPlayingProgress(audio)
+    }
+
+    if (id === "npBack") {
+      const audio = el<HTMLAudioElement>("player")
+      audio.currentTime = Math.max(0, audio.currentTime - 15)
+      syncNowPlayingProgress(audio)
+    }
+
+    if (id === "npNextChapter" && currentItemId) {
+      const next = currentChapterIndex + 1
+      if (next < currentFiles.length) {
+        await playChapter(currentItemId, next)
       }
     }
 
@@ -319,6 +416,7 @@ async function handleLogin() {
 
   show(el("loginView"), false);
   show(el("homeView"), true);
+  show(el("miniPlayer"), true);
   await loadHome();
 }
 
@@ -326,6 +424,7 @@ async function handleLogout() {
   const { serverUrl, username } = getSaved();
   await logOut(serverUrl, username);
   show(el("homeView"), false);
+  show(el("miniPlayer"), false);
   show(el("loginView"), true);
   setMsg("loginMsg", "Logged out", "ok");
 }
@@ -333,12 +432,14 @@ async function handleLogout() {
 /* ---------------- Navigation ---------------- */
 async function backFromDetail() {
 
-  await forceSaveProgress()
-  await stopPlaybackSession()
-
+  // Show library immediately — don't block on network calls
   setContinueVisible(true);
   show(el("itemDetailView"), false);
   show(el("libraryItemsView"), true);
+
+  // Save progress + stop session in the background
+  forceSaveProgress().catch(() => {});
+  stopPlaybackSession().catch(() => {});
 }
 
 function setContinueVisible(showIt: boolean) {
@@ -417,18 +518,24 @@ async function renderLibraries(libraries: any) {
 
   select.onchange = async () => {
     const { serverUrl, username } = getSaved();
+    const grid = el("libraryItemsView");
+    grid.classList.add("loading");
     currentLibraryId = select.value;
     setMsg("homeMsg", "Loading library…", "none");
 
-    const items = await invoke<any>("abs_get_library_items", {
-      serverUrl, username, libraryId: currentLibraryId
-    });
+    try {
+      const items = await invoke<any>("abs_get_library_items", {
+        serverUrl, username, libraryId: currentLibraryId
+      });
 
-    const selected = libsArr.find((x) => String(x.id) === currentLibraryId);
-    showLibraryItems(selected?.name ?? "Library", items);
+      const selected = libsArr.find((x) => String(x.id) === currentLibraryId);
+      showLibraryItems(selected?.name ?? "Library", items);
 
-    // Uppdatera continue-lista med filtrering per bibliotek
-    await renderContinueListening(lastInProgress);
+      // Uppdatera continue-lista med filtrering per bibliotek
+      await renderContinueListening(lastInProgress);
+    } finally {
+      grid.classList.remove("loading");
+    }
   };
 
   if (libsArr.length) {
@@ -769,7 +876,9 @@ async function renderContinueListening(inProgress: any) {
 function showLibraryItems(name: string, items: any) {
   currentLibraryItems = items?.items ?? items?.results ?? items ?? [];
   currentLibraryItemIds = new Set(currentLibraryItems.map((x: any) => String(x?.id)).filter(Boolean));
-  setMsg("homeMsg", `Library: ${name}`, "ok");
+  setMsg("homeMsg", "", "");
+  const total = el("libraryTotal");
+  if (total) total.textContent = `${name} — ${currentLibraryItems.length} book${currentLibraryItems.length === 1 ? "" : "s"}`;
   void renderLibraryGrid();
 }
 
@@ -1175,8 +1284,7 @@ async function playChapter(itemId: string, index: number) {
 
     }
 
-    const btn = document.getElementById("miniPlayPause")
-    if (btn) btn.textContent = "⏸"
+    setPlaybackButtons(true)
     try{
 
       // For podcasts, use cached data; for audiobooks, fetch fresh data
@@ -1246,8 +1354,7 @@ async function playChapter(itemId: string, index: number) {
 
     audio.onpause = async () => {
 
-      const btn = document.getElementById("miniPlayPause")
-      if (btn) btn.textContent = "▶"
+      setPlaybackButtons(false)
 
         const { serverUrl, username } = getSaved()
         const audio = el<HTMLAudioElement>("player")
@@ -1362,32 +1469,14 @@ async function playChapter(itemId: string, index: number) {
       const totLbl = el("miniTotal")
 
       if (currentItemId) {
-
-        // Check if this is a podcast (episodes have audioFile property) or audiobook
-        const isPodcast = currentFiles[0]?.audioFile !== undefined;
-        
-        let total: number;
-        let absolute: number;
-        
-        if (isPodcast) {
-          // For podcasts: show only current episode duration
-          const currentFile = currentFiles[currentChapterIndex];
-          total = currentFile?.audioFile?.duration || 0;
-          if (total === 0 && audio.duration && isFinite(audio.duration)) total = audio.duration;
-          absolute = audio.currentTime;
-        } else {
-          // For audiobooks: show total duration across all chapters
-          total = sumDurationsFromItem({ media: { audioFiles: currentFiles } });
-          absolute = audio.currentTime + getChapterStart(currentChapterIndex);
-        }
-
-        const pct =
-        total > 0 ? absolute / total * 100 : 0
+        const { total, absolute } = getPlaybackTotals(audio)
+        const pct = total > 0 ? (absolute / total) * 100 : 0
 
         miniBar.style.width = pct + "%"
-
         curLbl.textContent = fmtTime(absolute)
         totLbl.textContent = fmtTime(total)
+
+        syncNowPlayingProgress(audio)
       }
 
 
@@ -1570,6 +1659,32 @@ async function boot() {
     audio.volume = Number((e.target as HTMLInputElement).value)
   }
 
+  const npSeek = document.getElementById("npSeek") as HTMLInputElement | null
+  if (npSeek) {
+    npSeek.oninput = (e) => {
+      const audio = el<HTMLAudioElement>("player")
+      const pct = Number((e.target as HTMLInputElement).value) / 100
+      const { total } = getPlaybackTotals(audio)
+      if (total > 0) {
+        const targetAbsolute = total * pct
+        const isPodcast = currentFiles[0]?.audioFile !== undefined
+
+        if (isPodcast) {
+          audio.currentTime = Math.max(0, targetAbsolute)
+        } else {
+          const pos = getChapterIndexFromTime(targetAbsolute)
+          if (pos.index !== currentChapterIndex && currentItemId) {
+            forcedSeekTime = pos.offset
+            void playChapter(currentItemId, pos.index)
+          } else {
+            audio.currentTime = Math.max(0, pos.offset)
+          }
+        }
+      }
+      syncNowPlayingProgress(audio)
+    }
+  }
+
   wireSortSelect();
   const saved = getSaved();
   if (saved.serverUrl && saved.username) {
@@ -1578,12 +1693,14 @@ async function boot() {
       await invoke("abs_set_active_user", saved);
       show(el("loginView"), false);
       show(el("homeView"), true);
+      show(el("miniPlayer"), true);
       await loadHome();
       return;
     }
   }
   show(el("loginView"), true);
   show(el("homeView"), false);
+  show(el("miniPlayer"), false);
 
   showAppVersion()
 }

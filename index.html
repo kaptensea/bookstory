@@ -9,11 +9,23 @@
   </head>
 
   <body>
+    <div id="windowTitlebar" data-tauri-drag-region>
+      <div id="windowTitle">Bookstory</div>
+      <div id="windowControls">
+        <button id="winMinBtn" type="button" title="Minimize">_</button>
+        <button id="winMaxBtn" type="button" title="Maximize">▢</button>
+        <button id="winCloseBtn" type="button" title="Close">✕</button>
+      </div>
+    </div>
+
     <div class="container">
 
       <!-- LOGIN VIEW -->
       <div id="loginView">
-        <h1>Bookstory</h1>
+        <div class="login-brand">
+          <img src="/src/assets/bookstory-logo.svg" alt="Bookstory" class="login-logo" />
+          <h1>Bookstory</h1>
+        </div>
         <p class="subtitle">Connect to your Audiobookshelf server</p>
 
         <label for="server">Server address</label>
@@ -36,14 +48,11 @@
 
       <!-- TOP BAR (full width) -->
       <div class="topbar">
-        <div>
-          <h1>Bookstory</h1>
-          <div id="whoami" class="subtitle">Signed in</div>
+        <h1>Bookstory</h1>
+        <div id="topbarBrand" aria-hidden="true">
+          <img src="/src/assets/bookstory-logo.svg" alt="" />
         </div>
-        <div class="actions">
-          <button id="refreshBtn">Refresh</button>
-          <button id="logoutBtn">Log out</button>
-        </div>
+        <div id="appVersion"></div>
       </div>
 
       <!-- CONTENT ROW -->
@@ -61,9 +70,8 @@
             <option value="za">Z → A</option>
           </select>
 
-          <div id="appVersion"
-     style="color:#aaa;font-size:11px;margin-top:20px">
-</div>
+          <button id="logoutBtn" style="margin-top:12px;">Log out</button>
+          <div id="whoami" class="sidebar-whoami"></div>
 
         </aside>
 
@@ -77,6 +85,7 @@
             </div>
           </section>
 
+          <div id="libraryTotal" class="library-total"></div>
           <div id="libraryItemsView"></div>
           <div id="itemDetailView" style="display:none;"></div>
           <div id="homeMsg" class="msg"></div>
@@ -92,8 +101,10 @@
 
   <div id="miniInfo" class="mini-click">
 
-    <div id="miniTitle"></div>
-    <div id="miniLoading" class="mini-loading"></div>
+    <div id="miniTitleRow">
+      <div id="miniTitle">Nothing playing</div>
+      <div id="miniLoading" class="mini-loading"></div>
+    </div>
     <div id="miniAuthor"></div>
 
     <div id="miniProgressWrap">
@@ -108,9 +119,9 @@
     <div id="miniControls">
 
   <div id="miniButtons">
-      <button id="miniPrevChapter">⏮</button>
+      <button id="miniPrevChapter">❮</button>
       <button id="miniPlayPause">▶</button>
-      <button id="miniNextChapter">⏭</button>
+      <button id="miniNextChapter">❯</button>
       <button id="openNowPlaying">▲</button>
   </div>
 
@@ -137,10 +148,15 @@
 
   <input id="npSeek" type="range" min="0" max="100" value="0" />
 
+  <div id="npTimeRow">
+    <span id="npCurrent">0:00</span>
+    <span id="npTotal">0:00</span>
+  </div>
+
   <div class="np-controls">
-  <button id="npBack">⏪</button>
+  <button id="npBack">❮</button>
   <button id="npPlayPause">▶</button>
-  <button id="npForward">⏩</button>
+  <button id="npForward">❯</button>
   <button id="npNextChapter">⏭</button>
 </div>
 
