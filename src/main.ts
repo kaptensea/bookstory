@@ -876,7 +876,7 @@ async function renderContinueListening(inProgress: any) {
 function showLibraryItems(name: string, items: any) {
   currentLibraryItems = items?.items ?? items?.results ?? items ?? [];
   currentLibraryItemIds = new Set(currentLibraryItems.map((x: any) => String(x?.id)).filter(Boolean));
-  setMsg("homeMsg", "", "");
+  setMsg("homeMsg", "", "none");
   const total = el("libraryTotal");
   if (total) total.textContent = `${name} — ${currentLibraryItems.length} book${currentLibraryItems.length === 1 ? "" : "s"}`;
   void renderLibraryGrid();

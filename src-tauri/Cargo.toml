@@ -1,6 +1,6 @@
 [package]
 name = "bookstory"
-version = "0.6.0"
+version = "0.6.1"
 description = "Audiobookshelf desktop client"
 authors = ["Swetux"]
 edition = "2021"
