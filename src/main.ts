@@ -789,7 +789,10 @@ async function renderContinueListening(inProgress: any) {
     // progress init
     (async () => {
       try {
-        const item = await invoke<any>("abs_get_item", { serverUrl, username, itemId });
+        const [item, progressObj] = await Promise.all([
+          invoke<any>("abs_get_item", { serverUrl, username, itemId }),
+          invoke<any>("abs_get_progress", { serverUrl, username, itemId }).catch(() => null),
+        ]);
         let duration = sumDurationsFromItem(item);
 
         if (!duration || duration < 60) {
@@ -800,11 +803,25 @@ async function renderContinueListening(inProgress: any) {
         }
 
         duration = normalizeSecondsMaybe(duration);
-        let currentTime = getCurrentTimeForProgress(item, p);
+
+        // progressObj from /api/me/progress/{id} has currentTime directly
+        let currentTime = 0;
+        if (progressObj?.currentTime && progressObj.currentTime > 0) {
+          currentTime = normalizeSecondsMaybe(progressObj.currentTime, duration);
+        } else {
+          currentTime = getCurrentTimeForProgress(item, p, duration);
+        }
 
         progressByItemId.set(itemId, { currentTime });
 
         let pct = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+        // Use direct progress fraction from /api/me/progress first
+        if (progressObj?.progress && progressObj.progress > 0) {
+          const frac = progressObj.progress > 1 ? progressObj.progress / 100 : progressObj.progress;
+          pct = Math.max(pct, frac * 100);
+          if (currentTime <= 0) currentTime = duration * frac;
+        }
 
         const fraction = getBestProgressFraction(item, p);
         if (fraction > 0) {
