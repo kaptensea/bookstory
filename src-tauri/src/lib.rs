@@ -365,7 +365,33 @@ async fn abs_get_me(server_url: String, username: String) -> Result<serde_json::
 async fn abs_get_item(server_url: String, username: String, item_id: String) -> Result<serde_json::Value, String> {
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
-    let url = format!("{}/api/items/{}", server_url, item_id);
+    let url = format!("{}/api/items/{}?include=progress", server_url, item_id);
+
+    let resp = reqwest::Client::new()
+    .get(url)
+    .header("Authorization", format!("Bearer {}", token))
+    .send()
+    .await
+    .map_err(|e| format!("Network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Request failed (HTTP {}).", resp.status()));
+    }
+
+    resp.json::<serde_json::Value>()
+    .await
+    .map_err(|e| format!("Invalid server response: {}", e))
+}
+
+#[tauri::command]
+async fn abs_get_progress(
+    server_url: String,
+    username: String,
+    item_id: String,
+) -> Result<serde_json::Value, String> {
+    let server_url = normalize_server_url(server_url);
+    let token = get_token_from_keyring(&server_url, &username)?;
+    let url = format!("{}/api/me/progress/{}", server_url, item_id);
 
     let resp = reqwest::Client::new()
     .get(url)
@@ -683,6 +709,7 @@ pub fn run() {
         abs_get_libraries,
         abs_get_me,
         abs_get_item,
+        abs_get_progress,
         abs_get_items_in_progress,
         abs_get_library_items,
         abs_get_cover_url,
