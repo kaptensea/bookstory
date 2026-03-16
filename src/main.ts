@@ -8,7 +8,6 @@ let currentItemId: string | null = null;
 let currentFiles: any[] = [];
 let currentChapterRows: HTMLElement[] = [];
 let currentChapterIndex = 0;
-let playerItemId: string | null = null;
 let currentLibraryId: string | null = null;
 let lastInProgress: any = null;
 let forcedSeekTime: number | null = null;
@@ -95,14 +94,6 @@ function sumDurationsFromItem(item: any): number {
   return 600; // fallback 10 min
 }
 
-async function getDurationSeconds(serverUrl: string, username: string, itemId: string): Promise<number> {
-  const cached = durationByItemId.get(itemId);
-  if (cached && cached > 0) return cached;
-  const item = await invoke<any>("abs_get_item", { serverUrl, username, itemId });
-  const dur = sumDurationsFromItem(item);
-  if (dur > 0) durationByItemId.set(itemId, dur);
-  return dur;
-}
 
 function normalizeSecondsMaybe(value: number, durationSeconds?: number): number {
   if (durationSeconds && value > durationSeconds * 5) return value / 1000;
@@ -110,20 +101,6 @@ function normalizeSecondsMaybe(value: number, durationSeconds?: number): number 
   return value;
 }
 
-function extractCurrentTimeFromItem(item: any): number | null {
-  const cands = [
-    item?.userMediaProgress?.currentTime,
-    item?.userMediaProgress?.currentTimeMs,
-    item?.mediaProgress?.currentTime,
-    item?.mediaProgress?.currentTimeMs,
-    item?.media_progress?.currentTime,
-    item?.media_progress?.currentTimeMs,
-    item?.progress?.currentTime,
-    item?.progress?.currentTimeMs,
-  ];
-  for (const v of cands) if (typeof v === "number" && isFinite(v) && v > 0) return v;
-  return null;
-}
 
 /* ---------------- DOM helpers ---------------- */
 function el<T extends HTMLElement>(id: string): T {
@@ -351,14 +328,14 @@ async function loadHome() {
   el("whoami").textContent = `Signed in as ${me?.username ?? username}`;
 
   progressByItemId.clear();
-  renderLibraries(libraries);
 
   // Render continue listening med filter per bibliotek
+  await renderLibraries(libraries);
   await renderContinueListening(lastInProgress);
 }
 
 /* ---------------- Libraries ---------------- */
-function renderLibraries(libraries: any) {
+async function renderLibraries(libraries: any) {
   const libsArr: any[] = Array.isArray(libraries) ? libraries : (libraries?.libraries ?? []);
   const select = el<HTMLSelectElement>("librarySelect");
   select.innerHTML = "";
@@ -389,11 +366,16 @@ function renderLibraries(libraries: any) {
     await renderContinueListening(lastInProgress);
   };
 
-  if (libsArr.length) select.dispatchEvent(new Event("change"));
+  if (libsArr.length) {
+    await select.onchange?.(new Event("change") as any)
+  }
 }
 
-function getCurrentTimeForProgress(item: any, inProgressObj: any): number {
-  const duration = sumDurationsFromItem(item);
+function getCurrentTimeForProgress(
+  item: any,
+  inProgressObj: any,
+  duration?: number
+): number {
 
   // 1) Kolla item.userMediaProgress
   if (item?.userMediaProgress?.currentTime && item.userMediaProgress.currentTime > 0)
@@ -429,14 +411,25 @@ const intervalByItemId = new Map<string, number>();
 
 async function renderContinueListening(inProgress: any) {
 
+  if (currentItemId) {
+    console.log("Skip continue render while playing")
+    return
+  }
+
   const listEl = el("continueList");
   const emptyEl = el("continueEmpty");
   listEl.innerHTML = "";
+  emptyEl.style.display = "none";
 
   intervalByItemId.forEach(id => clearInterval(id));
   intervalByItemId.clear();
 
-  if (!currentLibraryItemIds.size) return;
+  if (!currentLibraryItemIds.size) {
+
+    console.log("Continue skip — library not ready")
+
+    return
+  }
 
   let allProgress: any[] = [];
 
@@ -483,6 +476,10 @@ async function renderContinueListening(inProgress: any) {
 
     const img = card.querySelector(".book-cover") as HTMLImageElement;
     const bar = card.querySelector(".progress-bar") as HTMLDivElement;
+    // ⭐ initial progress direkt från server session
+
+      bar.style.width = "3%"
+
     const titleEl = card.querySelector(".book-title") as HTMLElement;
     const authorEl = card.querySelector(".book-sub") as HTMLElement;
 
@@ -506,7 +503,14 @@ async function renderContinueListening(inProgress: any) {
     (async () => {
       try {
         const item = await invoke<any>("abs_get_item", { serverUrl, username, itemId });
-        const duration = sumDurationsFromItem(item);
+        let duration = sumDurationsFromItem(item);
+
+        if (!duration || duration < 60) {
+          duration = item?.media?.duration ||
+          item?.media?.metadata?.duration ||
+          item?.media?.durationSeconds ||
+          3600
+        }
         let currentTime = getCurrentTimeForProgress(item, p);
 
         progressByItemId.set(itemId, { currentTime });
@@ -585,7 +589,6 @@ async function renderLibraryGrid() {
 
     const title = it?.media?.metadata?.title ?? "Item";
     const author = it?.media?.metadata?.authorName ?? "";
-    const duration = sumDurationsFromItem(it)
 
     const card = document.createElement("div");
     card.className = "book-card";
@@ -730,8 +733,8 @@ async function showItemDetail(itemId: string) {
     progressByItemId.get(itemId)?.currentTime || 0
 
     const pos = getChapterIndexFromTime(progress)
+    const saved = getSaved()
 
-    const { serverUrl, username } = getSaved()
 
     const nextUrl = await invoke<string>("abs_local_player_url", {
       libraryId: itemId,
@@ -769,15 +772,6 @@ async function showItemDetail(itemId: string) {
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
 
-    let chapterStart = chapters[i]?.start ?? 0;
-
-    if (chapters[i]?.startTime !== undefined) {
-      chapterStart = chapters[i].startTime;
-    } else if (chapters[i]?.start !== undefined) {
-      chapterStart = chapters[i].start;
-    } else {
-      chapterStart = 0;
-    }
 
     console.log("CHAPTERS", chapters);
     console.log("FILES", files);
@@ -984,25 +978,7 @@ async function playChapter(itemId: string, index: number) {
       console.log("preload fail", e)
     }
     // 🔥 refresha Continue efter playback start
-    setTimeout(async () => {
 
-      try {
-
-        const { serverUrl, username } = getSaved()
-
-        lastInProgress =
-        await invoke("abs_get_items_in_progress", {
-          serverUrl,
-          username
-        })
-
-        await renderContinueListening(lastInProgress)
-
-        console.log("Continue refresh after play")
-
-      } catch {}
-
-    }, 1500)
 
     audio.onended = async () => {
 
