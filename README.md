@@ -50,7 +50,7 @@ npm run tauri build
 
 ## Releases
 
-Pre-built binaries for Linux, Windows, and macOS are available on the [Releases](https://github.com/kaptensea/bookstory/releases) page.
+Pre-built binaries for Linux and Windows are available on the [Releases](https://github.com/kaptensea/bookstory/releases) page.
 
 Pushing a tag like `v0.7.0` triggers the GitHub Actions workflow that builds and publishes release assets automatically.
 
