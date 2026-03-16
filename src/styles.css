@@ -530,6 +530,24 @@ margin-left:-7px;
   height:72px;
 }
 
+.continue-mark-played{
+  margin-top:6px;
+  align-self:flex-start;
+  font-size:11px;
+  line-height:1;
+  padding:5px 8px;
+  border-radius:8px;
+  border:1px solid rgba(255,255,255,.25);
+  background:rgba(0,0,0,.25);
+  color:#ddd;
+  cursor:pointer;
+}
+
+.continue-mark-played:hover{
+  border-color:rgba(255,255,255,.45);
+  color:#fff;
+}
+
 
 
 .book-cover{
@@ -595,7 +613,7 @@ margin-left:-7px;
   bottom:0;
   height:4px;
   background:rgba(0,0,0,.5);
-  z-index:5;
+  z-index:20;
 }
 
 .cover-wrap .progress-bar{
@@ -612,7 +630,17 @@ margin-left:-7px;
   bottom:0;
   height:40%;
   background:linear-gradient(to top, rgba(0,0,0,.55), transparent);
+  z-index:1;
   pointer-events:none;
+}
+
+#continueList .continue-card .cover-wrap .progress-wrap {
+  z-index: 30;
+}
+
+#continueList .continue-card .cover-wrap .progress-bar {
+  height: 100%;
+  background: #4caf50;
 }
 
 .book-card{

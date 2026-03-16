@@ -38,13 +38,23 @@ function startMiniTicker(){
           const curLbl = el("miniCurrent")
           const totLbl = el("miniTotal")
 
-          const total =
-          sumDurationsFromItem({
-            media: { audioFiles: currentFiles }
-          })
-
-          const absolute =
-          audio.currentTime + getChapterStart(currentChapterIndex)
+          // Check if this is a podcast (episodes have audioFile property) or audiobook
+          const isPodcast = currentFiles[0]?.audioFile !== undefined;
+          
+          let total: number;
+          let absolute: number;
+          
+          if (isPodcast) {
+            // For podcasts: show only current episode duration
+            const currentFile = currentFiles[currentChapterIndex];
+            total = currentFile?.audioFile?.duration || 0;
+            if (total === 0 && audio.duration) total = audio.duration;
+            absolute = audio.currentTime;
+          } else {
+            // For audiobooks: show total duration across all chapters
+            total = sumDurationsFromItem({ media: { audioFiles: currentFiles } });
+            absolute = audio.currentTime + getChapterStart(currentChapterIndex);
+          }
 
           const pct =
           total > 0 ? absolute / total * 100 : 0
@@ -107,6 +117,16 @@ function sumDurationsFromItem(item: any): number {
   const af = item?.media?.audioFiles;
   if (Array.isArray(af) && af.length) {
     const sum = af.reduce((s: number, f: any) => s + (typeof f?.duration === "number" ? f.duration : 0), 0);
+    if (sum > 0) return sum;
+  }
+  const ep = item?.media?.episodes;
+  if (Array.isArray(ep) && ep.length) {
+    const sum = ep.reduce((s: number, e: any) => s + (typeof e?.audioFile?.duration === "number" ? e.audioFile.duration : 0), 0);
+    if (sum > 0) return sum;
+  }
+  const ec = item?.media?.episodeContent;
+  if (Array.isArray(ec) && ec.length) {
+    const sum = ec.reduce((s: number, e: any) => s + (typeof e?.duration === "number" ? e.duration : 0), 0);
     if (sum > 0) return sum;
   }
   const at = item?.media?.audioTracks;
@@ -209,8 +229,6 @@ document.addEventListener("click", async (e) => {
 
       const progress = progressByItemId.get(currentItemId)
       const serverTime = progress?.currentTime || 0
-
-      console.log("RESUME TIME =", serverTime)
 
       // säkerställ att filer finns
       if (!currentFiles.length) {
@@ -332,8 +350,14 @@ function setContinueVisible(showIt: boolean) {
 function extractInProgressArray(inProgress: any): any[] {
   if (!inProgress) return [];
 
+  if (Array.isArray(inProgress))
+    return inProgress
+
   if (Array.isArray(inProgress.sessions))
     return inProgress.sessions
+
+  if (Array.isArray(inProgress.results))
+    return inProgress.results
 
     if (Array.isArray(inProgress.libraryItems))
       return inProgress.libraryItems
@@ -345,7 +369,14 @@ function extractInProgressArray(inProgress: any): any[] {
 }
 
 function getItemId(p: any): string | null {
-  const id = p?.libraryItemId ?? p?.library_item_id ?? p?.itemId ?? p?.id ?? null;
+  const id =
+    p?.libraryItemId ??
+    p?.library_item_id ??
+    p?.libraryItem?.id ??
+    p?.itemId ??
+    p?.id ??
+    p?.media?.libraryItemId ??
+    null;
   return id ? String(id) : null;
 }
 
@@ -435,7 +466,93 @@ function getCurrentTimeForProgress(
   if (inProgressObj?.currentTimeMs && inProgressObj.currentTimeMs > 0)
     return normalizeSecondsMaybe(inProgressObj.currentTimeMs / 1000, duration);
 
+  // 4b) extra fallback shapes used by items-in-progress payloads
+  if (inProgressObj?.userMediaProgress?.currentTime && inProgressObj.userMediaProgress.currentTime > 0)
+    return normalizeSecondsMaybe(inProgressObj.userMediaProgress.currentTime, duration);
+  if (inProgressObj?.userMediaProgress?.currentTimeMs && inProgressObj.userMediaProgress.currentTimeMs > 0)
+    return normalizeSecondsMaybe(inProgressObj.userMediaProgress.currentTimeMs / 1000, duration);
+
+  if (inProgressObj?.mediaProgress?.currentTime && inProgressObj.mediaProgress.currentTime > 0)
+    return normalizeSecondsMaybe(inProgressObj.mediaProgress.currentTime, duration);
+  if (inProgressObj?.mediaProgress?.currentTimeMs && inProgressObj.mediaProgress.currentTimeMs > 0)
+    return normalizeSecondsMaybe(inProgressObj.mediaProgress.currentTimeMs / 1000, duration);
+
+  if (inProgressObj?.progress?.currentTime && inProgressObj.progress.currentTime > 0)
+    return normalizeSecondsMaybe(inProgressObj.progress.currentTime, duration);
+  if (inProgressObj?.progress?.currentTimeMs && inProgressObj.progress.currentTimeMs > 0)
+    return normalizeSecondsMaybe(inProgressObj.progress.currentTimeMs / 1000, duration);
+
   // 5) Om allt misslyckas, returnera 0
+  return 0;
+}
+
+function getBestProgressFraction(itemObj: any, inProgressObj: any): number {
+  const candidates = [
+    inProgressObj?.progress,
+    inProgressObj?.progress?.progress,
+    inProgressObj?.mediaProgress?.progress,
+    inProgressObj?.userMediaProgress?.progress,
+    inProgressObj?.progressPercentage,
+    inProgressObj?.progressPercent,
+    inProgressObj?.percentage,
+    itemObj?.progress,
+    itemObj?.progress?.progress,
+    itemObj?.mediaProgress?.progress,
+    itemObj?.userMediaProgress?.progress
+  ];
+
+  for (const value of candidates) {
+    if (typeof value !== "number") continue;
+    if (!isFinite(value)) continue;
+    if (value <= 0) continue;
+    if (value > 1) return Math.min(1, value / 100);
+    return Math.min(1, value);
+  }
+
+  return 0;
+}
+
+function getBestProgressPercentFromInProgress(inProgressObj: any): number {
+  const fraction = getBestProgressFraction(null, inProgressObj);
+  if (fraction > 0) return Math.min(100, Math.max(0, fraction * 100));
+
+  const durationCandidates = [
+    inProgressObj?.duration,
+    inProgressObj?.durationSeconds,
+    inProgressObj?.media?.duration,
+    inProgressObj?.media?.durationSeconds,
+  ];
+
+  const timeCandidates = [
+    inProgressObj?.currentTime,
+    inProgressObj?.currentTimeMs,
+    inProgressObj?.timeListening,
+    inProgressObj?.mediaProgress?.currentTime,
+    inProgressObj?.mediaProgress?.currentTimeMs,
+    inProgressObj?.userMediaProgress?.currentTime,
+    inProgressObj?.userMediaProgress?.currentTimeMs,
+  ];
+
+  let duration = 0;
+  for (const d of durationCandidates) {
+    if (typeof d === "number" && isFinite(d) && d > 0) {
+      duration = normalizeSecondsMaybe(d);
+      break;
+    }
+  }
+
+  let current = 0;
+  for (const t of timeCandidates) {
+    if (typeof t === "number" && isFinite(t) && t > 0) {
+      current = normalizeSecondsMaybe(t, duration || undefined);
+      break;
+    }
+  }
+
+  if (duration > 0 && current > 0) {
+    return Math.min(100, Math.max(0, (current / duration) * 100));
+  }
+
   return 0;
 }
 
@@ -445,10 +562,6 @@ const intervalByItemId = new Map<string, number>();
 
 async function renderContinueListening(inProgress: any) {
 
-  if (currentItemId) {
-    console.log("Skip continue render while playing")
-    return
-  }
 
   const listEl = el("continueList");
   const emptyEl = el("continueEmpty");
@@ -460,8 +573,6 @@ async function renderContinueListening(inProgress: any) {
 
   if (!currentLibraryItemIds.size) {
 
-    console.log("Continue skip — library not ready")
-
     return
   }
 
@@ -471,10 +582,29 @@ async function renderContinueListening(inProgress: any) {
   else if (inProgress?.sessions) allProgress = inProgress.sessions;
   else allProgress = extractInProgressArray(inProgress) || [];
 
-  const filteredProgress = allProgress.filter(p => {
+  const filteredProgress: any[] = [];
+  const byItemId = new Map<string, any>();
+
+  for (const p of allProgress) {
     const id = getItemId(p);
-    return id ? currentLibraryItemIds.has(id) : false;
-  });
+    if (!id) continue;
+
+    // Always scope by the currently loaded library items in this app.
+    if (!currentLibraryItemIds.has(id)) continue;
+
+    const currentTime = getCurrentTimeForProgress(null, p);
+
+    const prev = byItemId.get(id);
+    if (!prev) {
+      byItemId.set(id, p);
+      continue;
+    }
+
+    const prevTime = getCurrentTimeForProgress(null, prev);
+    if (currentTime >= prevTime) byItemId.set(id, p);
+  }
+
+  for (const v of byItemId.values()) filteredProgress.push(v);
 
   if (!filteredProgress.length) {
     emptyEl.style.display = "";
@@ -485,7 +615,7 @@ async function renderContinueListening(inProgress: any) {
 
   const { serverUrl, username } = getSaved();
 
-  for (const p of filteredProgress.slice(0, 10)) {
+  for (const p of filteredProgress) {
 
     const itemId = getItemId(p);
     if (!itemId) continue;
@@ -505,17 +635,23 @@ async function renderContinueListening(inProgress: any) {
     <div class="book-meta">
     <p class="book-title"></p>
     <p class="book-sub"></p>
+    <button class="continue-mark-played" type="button">Mark as played</button>
     </div>
     `;
 
     const img = card.querySelector(".book-cover") as HTMLImageElement;
     const bar = card.querySelector(".progress-bar") as HTMLDivElement;
-    // ⭐ initial progress direkt från server session
-
-      bar.style.width = "3%"
+    // Initial visual progress from in-progress payload when available.
+    const initialPct = getBestProgressPercentFromInProgress(p);
+    if (initialPct > 0) {
+      bar.style.width = Math.max(Math.round(initialPct), 5) + "%";
+    } else {
+      bar.style.width = "3%";
+    }
 
     const titleEl = card.querySelector(".book-title") as HTMLElement;
     const authorEl = card.querySelector(".book-sub") as HTMLElement;
+    const markPlayedBtn = card.querySelector(".continue-mark-played") as HTMLButtonElement;
 
     let title = p?.title ?? itemId;
     let author = p?.author ?? "";
@@ -545,12 +681,34 @@ async function renderContinueListening(inProgress: any) {
           item?.media?.durationSeconds ||
           3600
         }
+
+        duration = normalizeSecondsMaybe(duration);
         let currentTime = getCurrentTimeForProgress(item, p);
 
         progressByItemId.set(itemId, { currentTime });
 
-        let pct = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
+        let pct = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+        const fraction = getBestProgressFraction(item, p);
+        if (fraction > 0) {
+          pct = Math.max(pct, fraction * 100);
+          if (currentTime <= 0) currentTime = duration * fraction;
+        }
+
+        // Strong payload-first fallback when per-item fields are sparse.
+        pct = Math.max(pct, getBestProgressPercentFromInProgress(p));
+
+        // Keep very small but valid progress visible.
+        if (currentTime > 0 && pct <= 0) pct = 2;
         if (pct > 0 && pct < 5) pct = 5;
+        if (!isFinite(pct) || pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+
+        // Do not regress an already visible bar to 0 due sparse payload race.
+        const existingPct = parseFloat((bar.style.width || "0").replace("%", "")) || 0;
+        if (pct <= 0 && existingPct > 0) {
+          pct = existingPct;
+        }
 
         bar.style.width = pct + "%";
 
@@ -562,8 +720,10 @@ async function renderContinueListening(inProgress: any) {
             const cur = audio.currentTime;
             progressByItemId.set(itemId, { currentTime: cur });
 
-            let pct = duration > 0 ? Math.round((cur / duration) * 100) : 0;
+            let pct = duration > 0 ? (cur / duration) * 100 : 0;
             if (pct > 0 && pct < 5) pct = 5;
+            if (!isFinite(pct) || pct < 0) pct = 0;
+            if (pct > 100) pct = 100;
 
             bar.style.width = pct + "%";
           }
@@ -571,8 +731,9 @@ async function renderContinueListening(inProgress: any) {
 
         intervalByItemId.set(itemId, intervalId);
 
-      } catch {
-        bar.style.width = "0%";
+      } catch (e) {
+        // Keep the initial in-progress-based fill if item details fail to load.
+        console.log("continue progress init fail", e)
       }
     })();
 
@@ -587,6 +748,19 @@ async function renderContinueListening(inProgress: any) {
       forcedSeekTime = pos.offset;
 
       await playChapter(itemId, pos.index);
+    };
+
+    markPlayedBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      try {
+        await invoke("abs_mark_played", { serverUrl, username, itemId });
+
+        // Refresh from server and rerender current library continue list
+        lastInProgress = await invoke<any>("abs_get_items_in_progress", { serverUrl, username });
+        await renderContinueListening(lastInProgress);
+      } catch (e) {
+        console.log("mark played fail", e)
+      }
     };
   }
 }
@@ -662,18 +836,23 @@ if (progressWrap) {
       const x = e.clientX - rect.left
       const pct = x / rect.width
 
-      const total =
-      sumDurationsFromItem({
-        media: { audioFiles: currentFiles }
-      })
-
-      const target = total * pct
-
-      const pos = getChapterIndexFromTime(target)
-
-      forcedSeekTime = pos.offset
-
-        playChapter(currentItemId, pos.index)
+      // Check if podcast or audiobook
+      const isPodcast = currentFiles[0]?.audioFile !== undefined;
+      
+      if (isPodcast) {
+        // For podcasts: seek within current episode only
+        const currentFile = currentFiles[currentChapterIndex];
+        const episodeDuration = currentFile?.audioFile?.duration || 0;
+        const seekTime = episodeDuration * pct;
+        audio.currentTime = seekTime;
+      } else {
+        // For audiobooks: navigate across chapters
+        const total = sumDurationsFromItem({ media: { audioFiles: currentFiles } });
+        const target = total * pct;
+        const pos = getChapterIndexFromTime(target);
+        forcedSeekTime = pos.offset;
+        playChapter(currentItemId, pos.index);
+      }
   })
 }
 
@@ -748,6 +927,8 @@ async function showItemDetail(itemId: string) {
   // ===== TRACKLIST =====
   let files =
   item?.media?.audioFiles ||
+  item?.media?.episodes ||
+  item?.media?.episodeContent ||
   item?.media?.tracks ||
   item?.media?.audioTracks ||
   [];
@@ -759,6 +940,7 @@ async function showItemDetail(itemId: string) {
   .sort((a: any, b: any) => (a?.index ?? 0) - (b?.index ?? 0));
 
   currentFiles = files;
+  
   // 🔥 PREBUFFER RESUME CHAPTER
 
   try {
@@ -769,15 +951,15 @@ async function showItemDetail(itemId: string) {
     const pos = getChapterIndexFromTime(progress)
     getSaved()
 
+    const file = currentFiles[pos.index];
+    const fileId = file?.audioFile?.ino || file?.ino;
 
     const nextUrl = await invoke<string>("abs_local_player_url", {
       libraryId: itemId,
-      index: currentFiles[pos.index].ino
+      index: fileId
     })
 
     preloadAudio.src = nextUrl
-
-    console.log("PREBUFFER RESUME CHAPTER", pos.index)
 
   } catch (e) {
     console.log("resume prebuffer fail", e)
@@ -798,17 +980,8 @@ async function showItemDetail(itemId: string) {
   const chapterRows: HTMLElement[] = []
   list.style.marginTop = "18px";
 
-  const chapters =
-  item?.media?.chapters ||
-  item?.media?.metadata?.chapters ||
-  [];
-
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
-
-
-    console.log("CHAPTERS", chapters);
-    console.log("FILES", files);
 
     const row = document.createElement("div");
     chapterRows.push(row)
@@ -818,11 +991,14 @@ async function showItemDetail(itemId: string) {
     row.style.borderBottom = "1px solid rgba(255,255,255,.05)";
 
     const left = document.createElement("div");
-    left.textContent = f?.metadata?.title || `Track ${i + 1}`;
+    left.textContent = f?.title || f?.metadata?.title || f?.filename || `Track ${i + 1}`;
+
+    // Handle both audiobook files (duration) and podcast episodes (audioFile.duration)
+    const episodeDuration = f?.duration || f?.audioFile?.duration || f?.audioLength || 0;
 
     const right = document.createElement("div");
     right.style.opacity = "0.7";
-    right.textContent = fmt(f?.duration);
+    right.textContent = fmt(episodeDuration);
 
     row.appendChild(left);
     row.appendChild(right);
@@ -860,8 +1036,6 @@ async function showItemDetail(itemId: string) {
       bar.style.width = pct + "%"
     }
 
-    console.log("DETAIL PROGRESS", currentTime, duration, pct)
-
   } catch (e) {
     console.log("detail progress preload fail", e)
   }
@@ -893,7 +1067,8 @@ function getChapterIndexFromTime(time: number): { index: number, offset: number 
 
   for (let i = 0; i < currentFiles.length; i++) {
 
-    const dur = currentFiles[i]?.duration || 0
+    // Handle both audiobook chapters (duration) and podcast episodes (audioFile.duration)
+    const dur = currentFiles[i]?.duration || currentFiles[i]?.audioFile?.duration || 0
 
     if (time < sum + dur) {
       return {
@@ -919,15 +1094,30 @@ async function playChapter(itemId: string, index: number) {
   try {
 
     const { serverUrl, username } = getSaved();
+    
+    // Only trigger play for audiobooks (podcasts don't need this)
+    const isPodcast = currentFiles[0]?.audioFile !== undefined;
+    
+    // For podcasts, pause and wait for previous episode's sync to settle before loading new one
+    if (isPodcast) {
+      const audio = el<HTMLAudioElement>("player");
+      audio.pause();
+      // Wait for previous episode's background requests (sync/progress) to settle
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    
     await invoke("abs_set_active_user", { serverUrl, username });
-    try {
-      await invoke("abs_trigger_play", {
-        serverUrl,
-        username,
-        itemId
-      })
-    } catch (e) {
-      console.log("play trigger fail", e)
+    
+    if (!isPodcast) {
+      try {
+        await invoke("abs_trigger_play", {
+          serverUrl,
+          username,
+          itemId
+        })
+      } catch (e) {
+        console.log("play trigger fail", e)
+      }
     }
 
     currentChapterIndex = index;
@@ -940,27 +1130,38 @@ async function playChapter(itemId: string, index: number) {
     const f = currentFiles[index];
     if (!f) return;
 
-    const fileIno = currentFiles[index].ino;
+    // Episodes use audioFile.ino, audiofiles use ino
+    const fileIno = currentFiles[index].audioFile?.ino || currentFiles[index].ino;
 
     const url = await invoke<string>("abs_local_player_url", {
       libraryId: itemId,
       index: fileIno
     });
 
-    console.log("AUDIO URL =", url);
-
+    // Completely reset audio element to clear any bad state
     audio.pause();
+    audio.currentTime = 0;
+    audio.src = "";
+    
+    // Small delay to let previous state clear
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     audio.src = url;
     el("miniLoading").style.display = "block"
     audio.preload = "auto"
+    
+    // Add error handler with recovery
+    audio.onerror = () => {
+      console.log("AUDIO ERROR:", audio.error?.message, "Code:", audio.error?.code);
+      el("miniLoading").style.display = "none"
+      isLoadingChapter = false; // Allow user to retry
+    };
+    
     audio.load()
 
     audio.onloadedmetadata = async () => {
 
       if (forcedSeekTime !== null) {
-
-        console.log("SEEK TO", forcedSeekTime)
-
         audio.currentTime = forcedSeekTime
         forcedSeekTime = null
 
@@ -968,7 +1169,6 @@ async function playChapter(itemId: string, index: number) {
 
       try {
         await audio.play()
-        console.log("AUDIO STARTED")
       } catch (e) {
         console.log("AUDIO PLAY FAIL", e)
       }
@@ -979,11 +1179,24 @@ async function playChapter(itemId: string, index: number) {
     if (btn) btn.textContent = "⏸"
     try{
 
-      const item = await invoke<any>("abs_get_item",{serverUrl,username,itemId})
-
-      const title = item?.media?.metadata?.title || ""
-      const author = item?.media?.metadata?.authorName || ""
-
+      // For podcasts, use cached data; for audiobooks, fetch fresh data
+      const isPodcast = currentFiles[0]?.audioFile !== undefined;
+      const currentFile = currentFiles[index];
+      
+      let title: string;
+      let author: string;
+      
+      if (isPodcast) {
+        // Use cached data for podcasts - faster
+        title = currentFile?.title || ""
+        author = "" // podcasts don't have author on episode level
+      } else {
+        // For audiobooks, fetch full item data
+        const item = await invoke<any>("abs_get_item",{serverUrl,username,itemId})
+        title = currentFile?.title || item?.media?.metadata?.title || ""
+        author = item?.media?.metadata?.authorName || ""
+      }
+      
       const cover = await invoke<string>("abs_get_cover_url",{serverUrl,username,itemId})
 
       showMiniPlayer(title,author,cover)
@@ -997,7 +1210,8 @@ async function playChapter(itemId: string, index: number) {
 
       if (next < currentFiles.length) {
 
-        const nextIno = currentFiles[next].ino
+        const nextFile = currentFiles[next];
+        const nextIno = nextFile?.audioFile?.ino || nextFile?.ino;
 
         const nextUrl = await invoke<string>("abs_local_player_url", {
           libraryId: itemId,
@@ -1005,8 +1219,6 @@ async function playChapter(itemId: string, index: number) {
         })
 
         preloadAudio.src = nextUrl
-
-        console.log("PRELOAD NEXT =", next)
 
       }
 
@@ -1018,20 +1230,14 @@ async function playChapter(itemId: string, index: number) {
 
     audio.onended = async () => {
 
-      console.log("CHAPTER ENDED")
-
       const next = currentChapterIndex + 1
 
       if (next < currentFiles.length) {
-
-        console.log("AUTO NEXT", next)
 
         forcedSeekTime = 0
           await playChapter(currentItemId!, next)
 
       } else {
-
-        console.log("BOOK FINISHED")
 
         await stopPlaybackSession()
 
@@ -1048,10 +1254,11 @@ async function playChapter(itemId: string, index: number) {
 
         await forceSaveProgress()
 
-        if (currentSessionId) {
+        // Sync on pause - skip for podcasts due to server issues
+        const isPodcast = currentFiles[0]?.audioFile !== undefined;
+        if (currentSessionId && !isPodcast) {
 
-          const absolute =
-          audio.currentTime + getChapterStart(currentChapterIndex)
+          const absolute = audio.currentTime + getChapterStart(currentChapterIndex)
 
           await invoke("abs_sync_session", {
             serverUrl,
@@ -1060,7 +1267,6 @@ async function playChapter(itemId: string, index: number) {
             currentTime: absolute
           })
 
-          console.log("SYNC ON PAUSE")
         }
 
         // ⭐⭐⭐ NYTT — vänta innan Continue refresh ⭐⭐⭐
@@ -1078,8 +1284,6 @@ async function playChapter(itemId: string, index: number) {
 
             await renderContinueListening(lastInProgress)
 
-            console.log("Continue refresh AFTER pause delay")
-
           } catch (e) {
             console.log("continue refresh fail", e)
           }
@@ -1091,6 +1295,7 @@ async function playChapter(itemId: string, index: number) {
     try {
 
       const { serverUrl, username } = getSaved()
+      const isPodcast = currentFiles[0]?.audioFile !== undefined;
 
       const playRes: any = await invoke("abs_start_playback", {
         serverUrl,
@@ -1103,41 +1308,45 @@ async function playChapter(itemId: string, index: number) {
       playRes?.session?.id ||
       null
 
-      console.log("SESSION ID =", currentSessionId)
-
       // ⭐⭐⭐ LÄGG TILL DETTA ⭐⭐⭐
-      if (currentSessionId) {
-        await invoke("abs_sync_session", {
-          serverUrl,
-          username,
-          sessionId: currentSessionId,
-          currentTime: 0
-        })
-        console.log("SESSION FIRST SYNC")
+      if (currentSessionId && !isPodcast) {
+        // For audiobooks only - podcasts skip initial sync to avoid server overload
+        setTimeout(async () => {
+          try {
+            await invoke("abs_sync_session", {
+              serverUrl,
+              username,
+              sessionId: currentSessionId,
+              currentTime: 0
+            })
+          } catch (e) {
+            console.log("First sync failed, will retry:", e)
+          }
+        }, 0);
       }
 
       // ⭐ INITIAL PROGRESS SAVE (gör så item hamnar i Continue)
-      setTimeout(async () => {
+      if (!isPodcast) {
+        // For audiobooks only - save progress
+        setTimeout(async () => {
 
-        if (!currentItemId) return
+          if (!currentItemId) return
 
-          const audio = el<HTMLAudioElement>("player")
+            const audio = el<HTMLAudioElement>("player")
 
-          const absolute =
-          audio.currentTime + getChapterStart(currentChapterIndex)
+            const absolute = audio.currentTime + getChapterStart(currentChapterIndex)
 
-          const { serverUrl, username } = getSaved()
+            const { serverUrl, username } = getSaved()
 
-          await invoke("abs_update_progress", {
-            serverUrl,
-            username,
-            itemId: currentItemId,
-            currentTime: absolute
-          })
+            await invoke("abs_update_progress", {
+              serverUrl,
+              username,
+              itemId: currentItemId,
+              currentTime: absolute
+            })
 
-          console.log("INITIAL PROGRESS SAVE")
-
-      }, 3000)
+        }, 3000);
+      }
 
     } catch (e) {
       console.log("session start fail", e)
@@ -1154,13 +1363,23 @@ async function playChapter(itemId: string, index: number) {
 
       if (currentItemId) {
 
-        const total =
-        sumDurationsFromItem({
-          media: { audioFiles: currentFiles }
-        })
-
-        const absolute =
-        audio.currentTime + getChapterStart(currentChapterIndex)
+        // Check if this is a podcast (episodes have audioFile property) or audiobook
+        const isPodcast = currentFiles[0]?.audioFile !== undefined;
+        
+        let total: number;
+        let absolute: number;
+        
+        if (isPodcast) {
+          // For podcasts: show only current episode duration
+          const currentFile = currentFiles[currentChapterIndex];
+          total = currentFile?.audioFile?.duration || 0;
+          if (total === 0 && audio.duration && isFinite(audio.duration)) total = audio.duration;
+          absolute = audio.currentTime;
+        } else {
+          // For audiobooks: show total duration across all chapters
+          total = sumDurationsFromItem({ media: { audioFiles: currentFiles } });
+          absolute = audio.currentTime + getChapterStart(currentChapterIndex);
+        }
 
         const pct =
         total > 0 ? absolute / total * 100 : 0
@@ -1175,27 +1394,35 @@ async function playChapter(itemId: string, index: number) {
         const now = Date.now()
         const { serverUrl, username } = getSaved()
 
-        // LIVE session sync
-        if (currentSessionId && now - lastSessionSync > 1000) {
-          lastSessionSync = now
+        // LIVE session sync - DISABLED for podcasts to avoid 502 errors
+        const isPodcast = currentFiles[0]?.audioFile !== undefined;
+        
+        if (!isPodcast) {
+          // Audiobooks only
+          const syncInterval = 10000;
+          
+          if (currentSessionId && now - lastSessionSync > syncInterval) {
+            lastSessionSync = now
 
-          const absolute =
-          audio.currentTime + getChapterStart(currentChapterIndex)
+            const absolute = audio.currentTime + getChapterStart(currentChapterIndex);
 
-          invoke("abs_sync_session", {
-            serverUrl,
-            username,
-            sessionId: currentSessionId,
-            currentTime: absolute
-          }).catch(console.error)
+            invoke("abs_sync_session", {
+              serverUrl,
+              username,
+              sessionId: currentSessionId,
+              currentTime: absolute
+            }).catch(console.error)
+          }
         }
 
-        // RIKTIG resume save
-        if (now - lastProgressSave > 20000) {
+        // Save progress for both audiobooks and podcasts (podcasts less frequent).
+        const progressInterval = isPodcast ? 120000 : 60000;
+        if (now - lastProgressSave > progressInterval) {
           lastProgressSave = now
 
-          const absolute =
-          audio.currentTime + getChapterStart(currentChapterIndex)
+          const absolute = isPodcast
+            ? audio.currentTime
+            : audio.currentTime + getChapterStart(currentChapterIndex);
 
           invoke("abs_update_progress", {
             serverUrl,
@@ -1259,8 +1486,11 @@ async function forceSaveProgress() {
 
       const { serverUrl, username } = getSaved()
 
-      const absolute =
-      audio.currentTime + getChapterStart(currentChapterIndex)
+      // For podcasts, use just current time; for audiobooks add chapter offset
+      const isPodcast = currentFiles[0]?.audioFile !== undefined;
+      const absolute = isPodcast
+        ? audio.currentTime
+        : audio.currentTime + getChapterStart(currentChapterIndex)
 
       await invoke("abs_update_progress", {
         serverUrl,
@@ -1269,19 +1499,19 @@ async function forceSaveProgress() {
         currentTime: absolute
       })
 
-      console.log("FORCE SAVE", audio.currentTime)
+      // ⭐ hämta ny Continue-data direkt från servern (skip for podcasts to avoid 502s)
+      if (!isPodcast) {
+        const inProgress =
+        await invoke<any>("abs_get_items_in_progress", {
+          serverUrl,
+          username
+        })
 
-      // ⭐ hämta ny Continue-data direkt från servern
-      const inProgress =
-      await invoke<any>("abs_get_items_in_progress", {
-        serverUrl,
-        username
-      })
+        lastInProgress = inProgress
 
-      lastInProgress = inProgress
-
-      // ⭐ rendera om Continue-listan
-      await renderContinueListening(lastInProgress)
+        // ⭐ rendera om Continue-listan
+        await renderContinueListening(lastInProgress)
+      }
 
     } catch (e) {
       console.log("force save fail", e)
@@ -1302,8 +1532,6 @@ async function stopPlaybackSession() {
         sessionId: currentSessionId
       })
 
-      console.log("SESSION STOPPED")
-
       currentSessionId = null
 
     } catch (e) {
@@ -1316,11 +1544,7 @@ async function showAppVersion() {
 
   const v = await getVersion()
 
-  console.log("VERSION =", v)   // ⭐ debug
-
   const elv = document.getElementById("appVersion")
-
-  console.log("EL =", elv)      // ⭐ debug
 
   if (elv) {
     elv.textContent = "v" + v
