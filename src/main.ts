@@ -17,7 +17,6 @@ let currentSessionId: string | null = null
 const progressByItemId = new Map<string, { currentTime: number; progress?: number }>();
 let currentLibraryItemIds = new Set<string>();
 let currentLibraryItems: any[] = [];
-const durationByItemId = new Map<string, number>();
 
 const preloadAudio = new Audio()
 preloadAudio.preload = "auto"
@@ -733,7 +732,7 @@ async function showItemDetail(itemId: string) {
     progressByItemId.get(itemId)?.currentTime || 0
 
     const pos = getChapterIndexFromTime(progress)
-    const saved = getSaved()
+    getSaved()
 
 
     const nextUrl = await invoke<string>("abs_local_player_url", {
