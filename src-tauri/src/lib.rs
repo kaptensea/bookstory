@@ -441,9 +441,15 @@ async fn abs_get_items_in_progress(
         return Err(format!("Request failed (HTTP {}).", resp.status()));
     }
 
-    resp.json::<serde_json::Value>()
+    let text = resp
+    .text()
     .await
-    .map_err(|e| format!("Invalid server response: {}", e))
+    .map_err(|e| format!("Read error: {}", e))?;
+
+    println!("INPROGRESS RAW = {}", text);
+
+    serde_json::from_str::<serde_json::Value>(&text)
+    .map_err(|e| format!("Invalid JSON: {}", e))
 }
 
 #[tauri::command]
@@ -476,20 +482,61 @@ async fn abs_get_cover_url(server_url: String, username: String, item_id: String
 }
 
 #[tauri::command]
-async fn abs_start_playback(server_url: String, username: String, item_id: String) -> Result<serde_json::Value, String> {
+async fn abs_trigger_play(
+    server_url: String,
+    username: String,
+    item_id: String,
+) -> Result<(), String> {
+
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
-    let url = format!("{}/api/items/{}/play", server_url, item_id);
+
+    let url = format!("{}/api/items/{}/play/0", server_url, item_id);
 
     let resp = reqwest::Client::new()
-    .post(url)
+    .get(url)
     .header("Authorization", format!("Bearer {}", token))
     .send()
     .await
     .map_err(|e| format!("Network error: {}", e))?;
 
     if !resp.status().is_success() {
-        return Err(format!("Request failed (HTTP {}).", resp.status()));
+        return Err(format!("Play trigger failed HTTP {}", resp.status()));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn abs_start_playback(
+    server_url: String,
+    username: String,
+    item_id: String,
+) -> Result<serde_json::Value, String> {
+
+    let server_url = normalize_server_url(server_url);
+    let token = get_token_from_keyring(&server_url, &username)?;
+
+    let url = format!("{}/api/items/{}/play", server_url, item_id);
+
+    let body = serde_json::json!({
+        "deviceInfo": {
+            "clientName": "Bookstory",
+            "deviceId": "bookstory-desktop",
+            "platform": "desktop"
+        }
+    });
+
+    let resp = reqwest::Client::new()
+    .post(url)
+    .header("Authorization", format!("Bearer {}", token))
+    .json(&body)
+    .send()
+    .await
+    .map_err(|e| format!("Network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Session start failed (HTTP {})", resp.status()));
     }
 
     resp.json::<serde_json::Value>()
@@ -632,7 +679,8 @@ pub fn run() {
         abs_set_active_user,
         abs_local_player_url,
         abs_local_audio_file_url,
-        abs_stream_chapter_url
+        abs_stream_chapter_url,
+        abs_trigger_play
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
