@@ -733,7 +733,7 @@ async function showItemDetail(itemId: string) {
 
     const { serverUrl, username } = getSaved()
 
-    const nextUrl = await invoke("abs_local_player_url", {
+    const nextUrl = await invoke<string>("abs_local_player_url", {
       libraryId: itemId,
       index: currentFiles[pos.index].ino
     })
@@ -914,7 +914,7 @@ async function playChapter(itemId: string, index: number) {
 
     const fileIno = currentFiles[index].ino;
 
-    const url = await invoke("abs_local_player_url", {
+    const url = await invoke<string>("abs_local_player_url", {
       libraryId: itemId,
       index: fileIno
     });
@@ -969,7 +969,7 @@ async function playChapter(itemId: string, index: number) {
 
         const nextIno = currentFiles[next].ino
 
-        const nextUrl = await invoke("abs_local_player_url", {
+        const nextUrl = await invoke<string>("abs_local_player_url", {
           libraryId: itemId,
           index: nextIno
         })
