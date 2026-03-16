@@ -365,7 +365,7 @@ async function loadHome() {
 
   // Render continue listening med filter per bibliotek
   await renderLibraries(libraries);
-  await renderContinueListening(lastInProgress);
+  // await renderContinueListening(lastInProgress);
 }
 
 /* ---------------- Libraries ---------------- */
@@ -951,6 +951,7 @@ async function playChapter(itemId: string, index: number) {
 
     audio.pause();
     audio.src = url;
+    el("miniLoading").style.display = "block"
     audio.preload = "auto"
     audio.load()
 
@@ -1331,6 +1332,9 @@ async function boot() {
 
   const audio = el<HTMLAudioElement>("player")
   audio.volume = 0.8
+  audio.addEventListener("playing", () => {
+    el("miniLoading").style.display = "none"
+  })
 
   el<HTMLInputElement>("miniVolume").value = "0.8"
 
