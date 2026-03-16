@@ -635,13 +635,12 @@ min-height:2.4em;
 
 
 #libraryItemsView .book-card:hover{
-transform:scale(1.025);
-box-shadow:0 10px 28px rgba(0,0,0,.35);
+box-shadow:0 14px 34px rgba(0,0,0,.45);
 z-index:2;
 }
 
 #libraryItemsView .book-card{
-transition: transform .18s ease, box-shadow .18s ease;
+transition: box-shadow .18s ease;
 will-change: transform;
 transform: translateZ(0);
 box-shadow: 0 2px 6px rgba(0,0,0,.18);
@@ -655,4 +654,20 @@ color:rgba(255,255,255,.55);
 
 #mainContent{
 padding-bottom:165px;
+}
+
+.mini-loading{
+  width:14px;
+  height:14px;
+  border:2px solid rgba(255,255,255,.25);
+  border-top:2px solid #4caf50;
+  border-radius:50%;
+  animation:miniSpin .8s linear infinite;
+  margin-top:4px;
+  display:none;
+}
+
+@keyframes miniSpin{
+  from{ transform:rotate(0deg); }
+  to{ transform:rotate(360deg); }
 }
