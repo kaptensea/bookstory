@@ -428,28 +428,56 @@ async fn abs_get_items_in_progress(
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
 
-    let url = format!("{}/api/me/listening-sessions", server_url);
+    // Prefer items-in-progress; fallback to listening-sessions if empty/unavailable.
+    let items_url = format!("{}/api/me/items-in-progress?limit=1000", server_url);
 
-    let resp = reqwest::Client::new()
-    .get(url)
+    let items_resp = reqwest::Client::new()
+    .get(items_url)
     .header("Authorization", format!("Bearer {}", token))
     .send()
     .await
     .map_err(|e| format!("Network error: {}", e))?;
 
-    if !resp.status().is_success() {
-        return Err(format!("Request failed (HTTP {}).", resp.status()));
+    if items_resp.status().is_success() {
+        let items_json = items_resp
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Invalid response: {}", e))?;
+
+        let count = if let Some(arr) = items_json.as_array() {
+            arr.len()
+        } else if let Some(arr) = items_json.get("results").and_then(|x| x.as_array()) {
+            arr.len()
+        } else if let Some(arr) = items_json.get("items").and_then(|x| x.as_array()) {
+            arr.len()
+        } else if let Some(arr) = items_json.get("libraryItems").and_then(|x| x.as_array()) {
+            arr.len()
+        } else {
+            0
+        };
+
+        if count > 0 {
+            return Ok(items_json);
+        }
     }
 
-    let text = resp
-    .text()
+    let sessions_url = format!("{}/api/me/listening-sessions?itemsPerPage=1000&page=0", server_url);
+
+    let sessions_resp = reqwest::Client::new()
+    .get(sessions_url)
+    .header("Authorization", format!("Bearer {}", token))
+    .send()
     .await
-    .map_err(|e| format!("Read error: {}", e))?;
+    .map_err(|e| format!("Network error: {}", e))?;
 
-    println!("INPROGRESS RAW = {}", text);
+    if !sessions_resp.status().is_success() {
+        return Err(format!("In-progress fallback failed (HTTP {}).", sessions_resp.status()));
+    }
 
-    serde_json::from_str::<serde_json::Value>(&text)
-    .map_err(|e| format!("Invalid JSON: {}", e))
+    sessions_resp
+    .json::<serde_json::Value>()
+    .await
+    .map_err(|e| format!("Invalid response: {}", e))
 }
 
 #[tauri::command]
@@ -607,6 +635,45 @@ async fn abs_update_progress(
 }
 
 #[tauri::command]
+async fn abs_mark_played(
+    server_url: String,
+    username: String,
+    item_id: String,
+) -> Result<(), String> {
+
+    let server_url = normalize_server_url(server_url);
+    let token = get_token_from_keyring(&server_url, &username)?;
+
+    let url = format!(
+        "{}/api/me/progress/{}",
+        server_url,
+        item_id
+    );
+
+    let body = serde_json::json!({
+        "isFinished": true,
+        "progress": 1.0
+    });
+
+    let resp = reqwest::Client::new()
+    .patch(url)
+    .header("Authorization", format!("Bearer {}", token))
+    .json(&body)
+    .send()
+    .await
+    .map_err(|e| format!("Network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "Mark played failed (HTTP {})",
+            resp.status()
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn abs_build_authed_url(server_url: String, username: String, path: String) -> Result<String, String> {
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
@@ -675,6 +742,7 @@ pub fn run() {
         abs_start_playback,
         abs_sync_session,
         abs_update_progress,
+        abs_mark_played,
         abs_build_authed_url,
         abs_set_active_user,
         abs_local_player_url,
