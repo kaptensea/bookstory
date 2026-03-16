@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="src-tauri/icons/128x128.png" width="96" alt="Bookstory icon" />
+  <img src="src/assets/bookstory-logo.svg" width="140" alt="Bookstory logo" />
   <h1>Bookstory</h1>
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
