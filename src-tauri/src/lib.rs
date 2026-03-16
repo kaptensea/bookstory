@@ -120,8 +120,6 @@ async fn audio_proxy(
         token
     );
 
-    println!("STREAM TARGET = {}", target);
-
     let mut req = client.get(&target);
 
     if let Some(rng) = &range_hdr {
@@ -170,40 +168,6 @@ async fn audio_proxy(
 }
 
 /* -------------------- Commands used by frontend -------------------- */
-
-#[tauri::command]
-async fn abs_local_audio_file_url(
-    state: tauri::State<'_, SharedState>,
-    library_item_id: String,
-    index: usize,
-) -> Result<String, String> {
-
-    let s = &state.0;
-
-    let server_url = s
-    .active_server_url
-    .lock()
-    .unwrap()
-    .clone()
-    .ok_or("No active server")?;
-
-    let username = s
-    .active_username
-    .lock()
-    .unwrap()
-    .clone()
-    .ok_or("No active user")?;
-
-    let token = get_token_from_keyring(&server_url, &username)?;
-
-    Ok(format!(
-        "{}/api/items/{}/play/{}?token={}",
-        server_url,
-        library_item_id,
-        index,
-        token
-    ))
-}
 
 #[tauri::command]
 async fn abs_stream_chapter_url(
@@ -673,23 +637,6 @@ async fn abs_mark_played(
     Ok(())
 }
 
-#[tauri::command]
-fn abs_build_authed_url(server_url: String, username: String, path: String) -> Result<String, String> {
-    let server_url = normalize_server_url(server_url);
-    let token = get_token_from_keyring(&server_url, &username)?;
-
-    let full = if path.starts_with("http://") || path.starts_with("https://") {
-        path
-    } else if path.starts_with('/') {
-        format!("{}{}", server_url, path)
-    } else {
-        format!("{}/{}", server_url, path)
-    };
-
-    let joiner = if full.contains('?') { "&" } else { "?" };
-    Ok(format!("{}{}token={}", full, joiner, token))
-}
-
 /* -------------------- Tauri entrypoint -------------------- */
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -743,10 +690,8 @@ pub fn run() {
         abs_sync_session,
         abs_update_progress,
         abs_mark_played,
-        abs_build_authed_url,
         abs_set_active_user,
         abs_local_player_url,
-        abs_local_audio_file_url,
         abs_stream_chapter_url,
         abs_trigger_play
     ])

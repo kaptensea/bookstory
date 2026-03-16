@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     env:
@@ -44,3 +47,27 @@ jobs:
         with:
           name: bookstory-${{ matrix.platform }}
           path: src-tauri/target/release/bundle
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: download bundled installers
+        uses: actions/download-artifact@v5
+        with:
+          pattern: bookstory-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            release-assets/**/*.AppImage
+            release-assets/**/*.deb
+            release-assets/**/*.rpm
+            release-assets/**/*.msi
+            release-assets/**/*.exe

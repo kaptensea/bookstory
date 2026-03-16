@@ -241,6 +241,15 @@ function escapeHtml(s: string) {
 /* ---------------- Storage ---------------- */
 function normalizeUrl(raw: string) { return raw.trim().replace(/\/+$/, ""); }
 
+function isValidServerUrl(raw: string) {
+  try {
+    const url = new URL(raw);
+    return (url.protocol === "http:" || url.protocol === "https:") && Boolean(url.host);
+  } catch {
+    return false;
+  }
+}
+
 function getSaved() {
   return {
     serverUrl: localStorage.getItem("serverUrl") ?? "",
@@ -408,6 +417,7 @@ async function handleLogin() {
   const username = el<HTMLInputElement>("username").value.trim();
   const password = el<HTMLInputElement>("password").value;
   if (!serverUrl) return setMsg("loginMsg", "Missing server address", "error");
+  if (!isValidServerUrl(serverUrl)) return setMsg("loginMsg", "Server must be a valid http:// or https:// URL", "error");
   if (!username) return setMsg("loginMsg", "Missing username", "error");
   if (!password) return setMsg("loginMsg", "Missing password", "error");
 
