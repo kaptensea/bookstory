@@ -17,10 +17,46 @@ let currentSessionId: string | null = null
 const progressByItemId = new Map<string, { currentTime: number; progress?: number }>();
 let currentLibraryItemIds = new Set<string>();
 let currentLibraryItems: any[] = [];
+let miniTicker: any = null
 
 const preloadAudio = new Audio()
 preloadAudio.preload = "auto"
 
+
+function startMiniTicker(){
+
+  if (miniTicker) return
+
+    const audio = el<HTMLAudioElement>("player")
+
+    miniTicker = setInterval(() => {
+
+      if (!currentItemId) return
+        if (audio.paused) return
+
+          const miniBar = el("miniProgressBar")
+          const curLbl = el("miniCurrent")
+          const totLbl = el("miniTotal")
+
+          const total =
+          sumDurationsFromItem({
+            media: { audioFiles: currentFiles }
+          })
+
+          const absolute =
+          audio.currentTime + getChapterStart(currentChapterIndex)
+
+          const pct =
+          total > 0 ? absolute / total * 100 : 0
+
+          miniBar.style.width = pct + "%"
+
+          curLbl.textContent = fmtTime(absolute)
+          totLbl.textContent = fmtTime(total)
+
+    }, 500)
+
+}
 /* ---------------- Duration helpers ---------------- */
 function formatTotalDuration(sec: number) {
 
@@ -285,7 +321,6 @@ async function backFromDetail() {
   setContinueVisible(true);
   show(el("itemDetailView"), false);
   show(el("libraryItemsView"), true);
-  currentItemId = null;
 }
 
 function setContinueVisible(showIt: boolean) {
@@ -951,6 +986,7 @@ async function playChapter(itemId: string, index: number) {
       const cover = await invoke<string>("abs_get_cover_url",{serverUrl,username,itemId})
 
       showMiniPlayer(title,author,cover)
+      startMiniTicker()
 
     }catch{}
     // 🔥 preload nästa kapitel

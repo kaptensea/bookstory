@@ -1,7 +1,7 @@
 {
   "name": "audiobookshelf-client",
   "private": true,
-  "version": "0.4.0-beta6",
+  "version": "0.4.0-beta7",
   "type": "module",
   "scripts": {
     "dev": "vite",
