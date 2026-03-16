@@ -15,7 +15,7 @@ use axum::{
 use rand::{distributions::Alphanumeric, Rng};
 use std::sync::{Arc, Mutex};
 
-const SERVICE_NAME: &str = "audiobookshelf-client";
+const SERVICE_NAME: &str = "bookstory";
 
 fn normalize_server_url(mut url: String) -> String {
     url = url.trim().to_string();
