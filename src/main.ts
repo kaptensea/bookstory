@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 
 type Json = any;
 
@@ -1299,6 +1300,22 @@ async function stopPlaybackSession() {
 }
 
 /* ---------------- Boot ---------------- */
+async function showAppVersion() {
+
+  const v = await getVersion()
+
+  console.log("VERSION =", v)   // ⭐ debug
+
+  const elv = document.getElementById("appVersion")
+
+  console.log("EL =", elv)      // ⭐ debug
+
+  if (elv) {
+    elv.textContent = "v" + v
+  }
+
+}
+
 async function boot() {
 
   const audio = el<HTMLAudioElement>("player")
@@ -1328,6 +1345,8 @@ async function boot() {
   }
   show(el("loginView"), true);
   show(el("homeView"), false);
+
+  showAppVersion()
 }
 
 window.addEventListener("beforeunload", () => {
@@ -1337,3 +1356,5 @@ window.addEventListener("beforeunload", () => {
 
 
 boot();
+
+window.addEventListener("load", showAppVersion);
