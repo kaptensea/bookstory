@@ -8,7 +8,7 @@ SESSION_TYPE="${XDG_SESSION_TYPE:-}"
 if [[ "$SESSION_TYPE" == "wayland" ]]; then
     if command -v nvidia-smi &> /dev/null || lspci 2>/dev/null | grep -qi nvidia; then
         echo "Detected Wayland + NVIDIA GPU. Starting with X11 backend..."
-        WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=X11 npm run tauri dev
+        WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 npm run tauri dev
         exit $?
     fi
 fi
