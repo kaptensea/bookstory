@@ -4,10 +4,9 @@
 On Linux systems with Wayland session + NVIDIA GPU, the Bookstory app fails to start with a GTK initialization error. This requires setting environment variables before the app launches.
 
 ## Solution
-We've implemented a two-tier approach:
+We've implemented an integrated approach where the launcher is automatically built into all packages.
 
 ### For Development (`npm run tauri:dev`)
-The `dev.sh` script auto-detects Wayland + NVIDIA and sets required env vars before launching:
 ```bash
 npm run tauri:dev
 ```
@@ -16,48 +15,66 @@ This script:
 - Detects if running on Wayland (`$XDG_SESSION_TYPE`)
 - Checks for NVIDIA GPU (using `nvidia-smi` or `lspci`)
 - Sets `WEBKIT_DISABLE_COMPOSITING_MODE=1` and `GDK_BACKEND=x11` if both conditions are met
-- Launches `npm run tauri dev`
+- Launches the app
 
 Works on all Linux systems—Wayland, X11, Intel, AMD, NVIDIA.
 
-### For Installers (deb/rpm/appimage)
-The `bookstory-launcher.sh` script provides the same detection for end-users.
-
-When users install via deb/rpm/appimage, the launcher performs auto-detection and sets env vars at runtime. 
-
-**Packagers should:**
-
-#### DEB/RPM Packages:
+### For Building Packages (`npm run tauri:build`)
 ```bash
-# 1. Extract the built binary
-cp src-tauri/target/release/bundle/deb/usr/bin/bookstory /usr/libexec/bookstory-bin
-
-# 2. Install the launcher wrapper
-sudo cp bookstory-launcher.sh /usr/bin/bookstory
-sudo chmod +x /usr/bin/bookstory /usr/libexec/bookstory-bin
-
-# 3. Update the .desktop file to run /usr/bin/bookstory
+npm run tauri:build
 ```
 
-#### AppImage:
-Embed `bookstory-launcher.sh` in the AppImage and set it as the entrypoint instead of the binary directly.
+This single command:
+1. Builds the app with `npm run tauri build`
+2. Automatically integrates the launcher into all packages (.deb, .rpm, .appimage)
+3. Creates single, self-contained installer files
 
-## How It Works
-1. **Dev Mode**: `npm run tauri:dev` → `dev.sh` (detects & sets env) → `npm run tauri dev`
-2. **Installed App**: User clicks "Bookstory" → launcher script (detects & sets env) → actual binary
+**Result**: End users get `.deb`/`.rpm`/`.appimage` files that "just work" without any manual setup.
 
-## Testing
-**On Wayland + NVIDIA:**
+When users install and launch the app:
+- The launcher automatically detects Wayland + NVIDIA
+- Sets required env vars at runtime
+- Launches the app with correct settings
+
+## How It Works (Technical)
+
+### Development
+`npm run tauri:dev` → `dev.sh` (detects & sets env) → `npm run tauri dev`
+
+### Installers (Automated)
+The build script:
+1. Builds the binary normally
+2. For deb/rpm: moves the binary to `/usr/libexec/bookstory-bin` and creates a wrapper script at `/usr/bin/bookstory`
+3. Updates `.desktop` files to call the wrapper instead of the binary
+4. Repackages everything into a single installer file
+
+When users launch the app, the wrapper script runs first, detects the environment, sets env vars, then executes the actual binary.
+
+## Usage
+
+### Building for Distribution
+```bash
+npm run tauri:build
+```
+
+Packages will be in: `src-tauri/target/release/bundle/`
+- `.deb` files for Debian/Ubuntu/Pop!_OS
+- `.rpm` files for Fedora/RHEL/openSUSE
+- `.AppImage` for universal Linux
+
+Each file is completely self-contained and ready to distribute.
+
+### Testing on Wayland + NVIDIA
 ```bash
 npm run tauri:dev  # Should work without manual env vars
 ```
 
-**On X11 or non-NVIDIA:**
+### Testing on X11 or non-NVIDIA
 ```bash
 npm run tauri:dev  # Works normally, detection finds no match
 ```
 
 ## Files
 - `dev.sh` - Development launcher (called by `npm run tauri:dev`)
-- `bookstory-launcher.sh` - Runtime launcher for installers
-- `build-and-bundle.sh` - Helper script for packaging
+- `bookstory-launcher.sh` - Launcher logic (embedded in packages by build script)
+- `build-and-bundle.sh` - Automated build and package integration
