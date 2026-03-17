@@ -3,7 +3,7 @@
   <h1>Bookstory</h1>
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
-  ![Version](https://img.shields.io/badge/version-0.6.5-blue)
+  ![Version](https://img.shields.io/badge/version-0.6.6-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
   ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
   ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8D8)
@@ -73,7 +73,7 @@ Releases are version-tag driven.
 Typical flow:
 1. Update versions in project metadata.
 2. Commit and push to `main`.
-3. Create and push a tag like `v0.6.5`.
+3. Create and push a tag like `v0.6.6`.
 4. GitHub Actions builds artifacts and publishes them to Releases.
 
 Use one tag push per release to avoid duplicate workflow runs.
