@@ -4,6 +4,127 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 type Json = any;
 
+type AppSettings = {
+  language: "en" | "sv";
+  defaultSort: "recent" | "az" | "za";
+  seekSeconds: number;
+  continueAnimations: boolean;
+};
+
+const DEFAULT_SETTINGS: AppSettings = {
+  language: "en",
+  defaultSort: "recent",
+  seekSeconds: 15,
+  continueAnimations: true,
+};
+
+const I18N: Record<"en" | "sv", Record<string, string>> = {
+  en: {
+    "login.subtitle": "Connect to your Audiobookshelf server",
+    "login.server": "Server address",
+    "login.username": "Username",
+    "login.password": "Password",
+    "login.signIn": "Sign in",
+    "sidebar.library": "Library",
+    "sidebar.sort": "Sort",
+    "sidebar.settings": "Settings",
+    "sidebar.logout": "Log out",
+    "home.continue": "Continue Listening",
+    "home.empty": "Nothing in progress yet.",
+    "home.loadingLibrary": "Loading library...",
+    "np.buffering": "Buffering...",
+    "home.signedInAs": "Signed in as {{name}}",
+    "home.loggedOut": "Logged out",
+    "sort.recent": "Recently added",
+    "sort.az": "A -> Z",
+    "sort.za": "Z -> A",
+    "common.item": "Item",
+    "common.back": "Back",
+    "common.play": "Play",
+    "common.resume": "Resume",
+    "common.playAgain": "Play again",
+    "continue.resumeTitle": "Resume playback",
+    "continue.markPlayedTitle": "Mark as played",
+    "menu.markPlayed": "Mark as played",
+    "menu.resetUnplayed": "Reset / mark as unplayed",
+    "settings.title": "Settings",
+    "settings.language": "Language",
+    "settings.lang.en": "English",
+    "settings.lang.sv": "Swedish",
+    "settings.defaultSort": "Default sort",
+    "settings.skipSeconds": "Skip seconds (back/forward)",
+    "settings.animations": "Enable Continue card animations",
+    "settings.save": "Save settings",
+    "settings.reset": "Reset defaults",
+    "settings.saved": "Settings saved",
+    "settings.defaultsRestored": "Defaults restored",
+    "error.missingServer": "Missing server address",
+    "error.invalidServer": "Server must be a valid http:// or https:// URL",
+    "error.missingUsername": "Missing username",
+    "error.missingPassword": "Missing password",
+    "label.book.singular": "book",
+    "label.book.plural": "books",
+  },
+  sv: {
+    "login.subtitle": "Anslut till din Audiobookshelf-server",
+    "login.server": "Serveradress",
+    "login.username": "Anv\u00e4ndarnamn",
+    "login.password": "L\u00f6senord",
+    "login.signIn": "Logga in",
+    "sidebar.library": "Bibliotek",
+    "sidebar.sort": "Sortering",
+    "sidebar.settings": "Inst\u00e4llningar",
+    "sidebar.logout": "Logga ut",
+    "home.continue": "Forts\u00e4tt lyssna",
+    "home.empty": "Inget p\u00e5g\u00e5r just nu.",
+    "home.loadingLibrary": "Laddar bibliotek...",
+    "np.buffering": "Buffrar...",
+    "home.signedInAs": "Inloggad som {{name}}",
+    "home.loggedOut": "Utloggad",
+    "sort.recent": "Senast tillagt",
+    "sort.az": "A -> \u00d6",
+    "sort.za": "\u00d6 -> A",
+    "common.item": "Objekt",
+    "common.back": "Tillbaka",
+    "common.play": "Spela",
+    "common.resume": "Forts\u00e4tt",
+    "common.playAgain": "Spela igen",
+    "continue.resumeTitle": "Forts\u00e4tt uppspelning",
+    "continue.markPlayedTitle": "Markera som spelad",
+    "menu.markPlayed": "Markera som spelad",
+    "menu.resetUnplayed": "\u00c5terst\u00e4ll / markera som ospelad",
+    "settings.title": "Inst\u00e4llningar",
+    "settings.language": "Spr\u00e5k",
+    "settings.lang.en": "Engelska",
+    "settings.lang.sv": "Svenska",
+    "settings.defaultSort": "Standardsortering",
+    "settings.skipSeconds": "Hoppa sekunder (bak/fram)",
+    "settings.animations": "Aktivera animationer i Forts\u00e4tt lyssna",
+    "settings.save": "Spara inst\u00e4llningar",
+    "settings.reset": "\u00c5terst\u00e4ll standard",
+    "settings.saved": "Inst\u00e4llningar sparade",
+    "settings.defaultsRestored": "Standard \u00e5terst\u00e4lld",
+    "error.missingServer": "Saknar serveradress",
+    "error.invalidServer": "Servern m\u00e5ste vara en giltig http://- eller https://-URL",
+    "error.missingUsername": "Saknar anv\u00e4ndarnamn",
+    "error.missingPassword": "Saknar l\u00f6senord",
+    "label.book.singular": "bok",
+    "label.book.plural": "b\u00f6cker",
+  }
+};
+
+function tr(key: string, vars?: Record<string, string | number>): string {
+  const lang = appSettings.language;
+  const raw = I18N[lang]?.[key] ?? I18N.en[key] ?? key;
+  if (!vars) return raw;
+  return raw.replace(/\{\{(\w+)\}\}/g, (_, k) => String(vars[k] ?? ""));
+}
+
+function setTextIfExists(id: string, value: string) {
+  const n = document.getElementById(id);
+  if (n) n.textContent = value;
+}
+
 let isLoadingChapter = false;
 let currentItemId: string | null = null;
 let currentFiles: any[] = [];
@@ -15,13 +136,154 @@ let forcedSeekTime: number | null = null;
 let lastSessionSync = 0
 let lastProgressSave = 0
 let currentSessionId: string | null = null
+let currentEpisodeId: string | null = null
+let currentItemFinished = false
+let hasStartedPlayback = false
+let currentLibraryMediaType: string | null = null
 const progressByItemId = new Map<string, { currentTime: number; progress?: number }>();
 let currentLibraryItemIds = new Set<string>();
 let currentLibraryItems: any[] = [];
 let miniTicker: any = null
+let continueRefreshTimer: any = null
+let continueRefreshInFlight = false
+const itemCacheById = new Map<string, any>();
+const ITEM_CACHE_MAX = 250;
+let playbackLoadingActive = false;
+let playbackLoadingStartTime = 0;
+let playbackLoadingStartPos = 0;
 
 const preloadAudio = new Audio()
 preloadAudio.preload = "auto"
+
+let appSettings: AppSettings = loadSettings();
+
+function loadSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem("appSettings");
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    const parsed = JSON.parse(raw);
+    return {
+      language: parsed?.language === "sv" ? "sv" : "en",
+      defaultSort: parsed?.defaultSort === "az" || parsed?.defaultSort === "za" ? parsed.defaultSort : "recent",
+      seekSeconds: Math.max(5, Math.min(120, Number(parsed?.seekSeconds) || DEFAULT_SETTINGS.seekSeconds)),
+      continueAnimations: parsed?.continueAnimations !== false,
+    };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function saveSettings(next: AppSettings) {
+  appSettings = next;
+  localStorage.setItem("appSettings", JSON.stringify(appSettings));
+  applySettings();
+}
+
+function applySettings() {
+  const sort = document.getElementById("sortSelect") as HTMLSelectElement | null;
+  if (sort) sort.value = appSettings.defaultSort;
+
+  document.body.classList.toggle("continue-anim-off", !appSettings.continueAnimations);
+  applyTranslations();
+}
+
+function applyTranslations() {
+  document.documentElement.lang = appSettings.language;
+  // Login view is always English.
+  setTextIfExists("loginSubtitle", I18N.en["login.subtitle"]);
+  setTextIfExists("serverLabel", I18N.en["login.server"]);
+  setTextIfExists("usernameLabel", I18N.en["login.username"]);
+  setTextIfExists("passwordLabel", I18N.en["login.password"]);
+  setTextIfExists("loginBtn", I18N.en["login.signIn"]);
+  setTextIfExists("topbarTitle", "Bookstory");
+  setTextIfExists("sidebarLibraryLabel", tr("sidebar.library"));
+  setTextIfExists("sidebarSortLabel", tr("sidebar.sort"));
+  setTextIfExists("settingsBtn", tr("sidebar.settings"));
+  setTextIfExists("logoutBtn", tr("sidebar.logout"));
+  setTextIfExists("continueHeading", tr("home.continue"));
+  setTextIfExists("continueEmpty", tr("home.empty"));
+  setTextIfExists("npLoadingText", tr("np.buffering"));
+
+  const sortSelect = document.getElementById("sortSelect") as HTMLSelectElement | null;
+  if (sortSelect) {
+    for (const opt of Array.from(sortSelect.options)) {
+      if (opt.value === "recent") opt.textContent = tr("sort.recent");
+      if (opt.value === "az") opt.textContent = tr("sort.az");
+      if (opt.value === "za") opt.textContent = tr("sort.za");
+    }
+  }
+
+  if (document.getElementById("settingsView")?.style.display !== "none") {
+    renderSettingsPage();
+  }
+}
+
+function getSeekSeconds(): number {
+  return Math.max(5, Math.min(120, Number(appSettings.seekSeconds) || 15));
+}
+
+function showSettingsPage() {
+  setContinueVisible(false);
+  show(el("libraryItemsView"), false);
+  show(el("itemDetailView"), false);
+  show(el("settingsView"), true);
+  renderSettingsPage();
+}
+
+function hideSettingsPage() {
+  show(el("settingsView"), false);
+  setContinueVisible(true);
+  show(el("libraryItemsView"), true);
+}
+
+function renderSettingsPage() {
+  const view = el<HTMLDivElement>("settingsView");
+  view.innerHTML = `
+    <div class="card settings-card">
+      <div class="settings-header">
+        <button id="settingsBackBtn" type="button">← ${tr("common.back")}</button>
+        <h2>${tr("settings.title")}</h2>
+      </div>
+
+      <label for="settingsLanguage">${tr("settings.language")}</label>
+      <select id="settingsLanguage">
+        <option value="en">${tr("settings.lang.en")}</option>
+        <option value="sv">${tr("settings.lang.sv")}</option>
+      </select>
+
+      <label for="settingsDefaultSort">${tr("settings.defaultSort")}</label>
+      <select id="settingsDefaultSort">
+        <option value="recent">${tr("sort.recent")}</option>
+        <option value="az">${tr("sort.az")}</option>
+        <option value="za">${tr("sort.za")}</option>
+      </select>
+
+      <label for="settingsSeekSeconds">${tr("settings.skipSeconds")}</label>
+      <input id="settingsSeekSeconds" type="number" min="5" max="120" step="1" />
+
+      <label class="settings-check-row">
+        <input id="settingsContinueAnimations" type="checkbox" />
+        <span>${tr("settings.animations")}</span>
+      </label>
+
+      <div class="settings-actions">
+        <button id="settingsSaveBtn" type="button">${tr("settings.save")}</button>
+        <button id="settingsResetBtn" type="button">${tr("settings.reset")}</button>
+      </div>
+      <div id="settingsMsg" class="msg"></div>
+    </div>
+  `;
+
+  const language = el<HTMLSelectElement>("settingsLanguage");
+  const sort = el<HTMLSelectElement>("settingsDefaultSort");
+  const seek = el<HTMLInputElement>("settingsSeekSeconds");
+  const anim = el<HTMLInputElement>("settingsContinueAnimations");
+
+  language.value = appSettings.language;
+  sort.value = appSettings.defaultSort;
+  seek.value = String(appSettings.seekSeconds);
+  anim.checked = appSettings.continueAnimations;
+}
 
 
 function startMiniTicker(){
@@ -207,6 +469,47 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 function show(node: HTMLElement, on: boolean) { node.style.display = on ? "" : "none"; }
+
+function setPlaybackLoading(loading: boolean) {
+  const mini = document.getElementById("miniLoading");
+  const np = document.getElementById("npLoading");
+  const npText = document.getElementById("npLoadingText");
+  if (mini) mini.style.display = loading ? "block" : "none";
+  if (np) np.style.display = loading ? "block" : "none";
+  if (npText) npText.style.display = loading ? "block" : "none";
+}
+
+function beginPlaybackLoading(audio: HTMLAudioElement) {
+  playbackLoadingActive = true;
+  playbackLoadingStartTime = Date.now();
+  playbackLoadingStartPos = audio.currentTime || 0;
+  setPlaybackLoading(true);
+}
+
+function resetPlaybackLoadingAnchor(audio: HTMLAudioElement) {
+  if (!playbackLoadingActive) return;
+  playbackLoadingStartTime = Date.now();
+  playbackLoadingStartPos = audio.currentTime || 0;
+}
+
+function maybeEndPlaybackLoading(audio: HTMLAudioElement) {
+  if (!playbackLoadingActive) return;
+  const moved = (audio.currentTime - playbackLoadingStartPos) > 0.05;
+  const runningFor = Date.now() - playbackLoadingStartTime;
+  if (moved || (runningFor > 12000 && !audio.paused)) {
+    playbackLoadingActive = false;
+    setPlaybackLoading(false);
+  }
+}
+
+function openNowPlayingPanel() {
+  show(el("nowPlayingView"), true);
+  if (playbackLoadingActive) setPlaybackLoading(true);
+  const audio = el<HTMLAudioElement>("player");
+  syncNowPlayingProgress(audio);
+  setPlaybackButtons(!audio.paused);
+}
+
 function showMiniPlayer(title:string, author:string, cover:string){
 
   el("miniPlayer").style.display = ""
@@ -282,6 +585,36 @@ document.addEventListener("click", async (e) => {
   try {
     if (id === "loginBtn") await handleLogin();
     if (id === "logoutBtn") await handleLogout();
+    if (id === "settingsBtn") showSettingsPage();
+    if (id === "settingsBackBtn") hideSettingsPage();
+    if (id === "settingsSaveBtn") {
+      const language = (document.getElementById("settingsLanguage") as HTMLSelectElement | null)?.value;
+      const defaultSort = (document.getElementById("settingsDefaultSort") as HTMLSelectElement | null)?.value as AppSettings["defaultSort"] | undefined;
+      const seekRaw = Number((document.getElementById("settingsSeekSeconds") as HTMLInputElement | null)?.value ?? appSettings.seekSeconds);
+      const continueAnimations = Boolean((document.getElementById("settingsContinueAnimations") as HTMLInputElement | null)?.checked);
+
+      const next: AppSettings = {
+        language: language === "sv" ? "sv" : "en",
+        defaultSort: defaultSort === "az" || defaultSort === "za" ? defaultSort : "recent",
+        seekSeconds: Math.max(5, Math.min(120, isFinite(seekRaw) ? seekRaw : appSettings.seekSeconds)),
+        continueAnimations,
+      };
+
+      saveSettings(next);
+      setMsg("settingsMsg", tr("settings.saved"), "ok");
+
+      if (currentLibraryItems.length) {
+        void renderLibraryGrid();
+      }
+    }
+    if (id === "settingsResetBtn") {
+      saveSettings({ ...DEFAULT_SETTINGS });
+      renderSettingsPage();
+      setMsg("settingsMsg", tr("settings.defaultsRestored"), "ok");
+      if (currentLibraryItems.length) {
+        void renderLibraryGrid();
+      }
+    }
     if (id === "backBtn") backFromDetail();
     if (id === "winMinBtn") {
       try { await getCurrentWindow().minimize(); } catch (e) { console.log("win min fail", e) }
@@ -298,6 +631,20 @@ document.addEventListener("click", async (e) => {
     }
     if (id === "resumeBtn" && currentItemId) {
 
+      if (currentItemFinished) {
+        const { serverUrl, username } = getSaved()
+        await invoke("abs_mark_unplayed", {
+          serverUrl,
+          username,
+          itemId: currentItemId,
+          episodeId: null
+        })
+        currentItemFinished = false
+        progressByItemId.set(currentItemId, { currentTime: 0 })
+        const btn = document.getElementById("resumeBtn") as HTMLButtonElement | null
+        if (btn) btn.textContent = `▶ ${tr("common.play")}`
+      }
+
       const progress = progressByItemId.get(currentItemId)
       const serverTime = progress?.currentTime || 0
 
@@ -310,23 +657,17 @@ document.addEventListener("click", async (e) => {
 
       forcedSeekTime = pos.offset
 
-        await playChapter(currentItemId, pos.index)
+        await playChapter(currentItemId, pos.index, true)
     }
 
     if (id === "openNowPlaying") {
-      show(el("nowPlayingView"), true)
-      const audio = el<HTMLAudioElement>("player")
-      syncNowPlayingProgress(audio)
-      setPlaybackButtons(!audio.paused)
+      openNowPlayingPanel()
     }
 
 
 
     if (id === "miniPlayer") {
-      show(el("nowPlayingView"), true);
-      const audio = el<HTMLAudioElement>("player")
-      syncNowPlayingProgress(audio)
-      setPlaybackButtons(!audio.paused)
+      openNowPlayingPanel();
     }
 
     if (id === "miniPlayPause") {
@@ -355,13 +696,13 @@ document.addEventListener("click", async (e) => {
 
     if (id === "npForward") {
       const audio = el<HTMLAudioElement>("player")
-      audio.currentTime = Math.min((audio.duration || Infinity), audio.currentTime + 15)
+      audio.currentTime = Math.min((audio.duration || Infinity), audio.currentTime + getSeekSeconds())
       syncNowPlayingProgress(audio)
     }
 
     if (id === "npBack") {
       const audio = el<HTMLAudioElement>("player")
-      audio.currentTime = Math.max(0, audio.currentTime - 15)
+      audio.currentTime = Math.max(0, audio.currentTime - getSeekSeconds())
       syncNowPlayingProgress(audio)
     }
 
@@ -447,9 +788,13 @@ async function backFromDetail() {
   show(el("itemDetailView"), false);
   show(el("libraryItemsView"), true);
 
-  // Save progress + stop session in the background
-  forceSaveProgress().catch(() => {});
-  stopPlaybackSession().catch(() => {});
+  // Save/stop only when playback actually started to avoid false continue entries.
+  const audio = document.getElementById("player") as HTMLAudioElement | null;
+  const hasPlaybackState = Boolean(audio?.src && ((audio.currentTime || 0) > 0 || !audio.paused));
+  if (hasStartedPlayback || hasPlaybackState || currentSessionId) {
+    forceSaveProgress().catch(() => {});
+    stopPlaybackSession().catch(() => {});
+  }
 }
 
 function setContinueVisible(showIt: boolean) {
@@ -491,17 +836,161 @@ function getItemId(p: any): string | null {
   return id ? String(id) : null;
 }
 
+function getEpisodeIdForProgress(p: any): string | null {
+  const id =
+    p?.episodeId ??
+    p?.episode?.id ??
+    p?.mediaProgress?.episodeId ??
+    p?.userMediaProgress?.episodeId ??
+    p?.progress?.episodeId ??
+    p?.mediaItemId ??
+    null;
+  return id ? String(id) : null;
+}
+
+function getTrackDisplayName(entry: any, index: number): string {
+  return entry?.title || entry?.metadata?.title || entry?.filename || `Track ${index + 1}`;
+}
+
+function progressKey(itemId: string, episodeId?: string | null): string {
+  return episodeId ? `${itemId}::${episodeId}` : itemId;
+}
+
+function isFinishedProgress(progressObj: any): boolean {
+  if (!progressObj) return false;
+  if (progressObj?.isFinished === true) return true;
+  const p = progressObj?.progress;
+  if (typeof p === "number") {
+    if (p >= 1) return true;
+    if (p > 1 && p >= 100) return true;
+  }
+  return false;
+}
+
+function setLibraryItemDoneState(itemId: string, done: boolean) {
+  const badge = document.querySelector(`[data-library-done-item="${itemId}"]`) as HTMLElement | null;
+  if (badge) badge.style.display = done ? "flex" : "none";
+}
+
+async function getItemCached(serverUrl: string, username: string, itemId: string, force = false): Promise<any> {
+  if (!force && itemCacheById.has(itemId)) return itemCacheById.get(itemId);
+  const item = await invoke<any>("abs_get_item", { serverUrl, username, itemId });
+  // Keep a bounded cache to avoid unbounded memory growth in long sessions.
+  if (itemCacheById.size >= ITEM_CACHE_MAX) {
+    const firstKey = itemCacheById.keys().next().value;
+    if (firstKey) itemCacheById.delete(firstKey);
+  }
+  itemCacheById.set(itemId, item);
+  return item;
+}
+
+function scheduleContinueRefresh(delay = 120) {
+  if (continueRefreshTimer) clearTimeout(continueRefreshTimer);
+  continueRefreshTimer = setTimeout(async () => {
+    if (continueRefreshInFlight) return;
+    continueRefreshInFlight = true;
+    try {
+      const { serverUrl, username } = getSaved();
+      lastInProgress = await invoke<any>("abs_get_items_in_progress", { serverUrl, username });
+      await renderContinueListening(lastInProgress);
+    } catch (e) {
+      console.log("continue refresh fail", e);
+    } finally {
+      continueRefreshInFlight = false;
+    }
+  }, delay);
+}
+
+function removeContinueCard(itemId: string, episodeId?: string | null) {
+  const key = progressKey(itemId, episodeId ?? null);
+  const card = document.querySelector(`[data-continue-key="${key}"]`) as HTMLElement | null;
+  if (!card) return;
+
+  card.classList.add("is-removing");
+  window.setTimeout(() => {
+    card.remove();
+    const listEl = document.getElementById("continueList");
+    const emptyEl = document.getElementById("continueEmpty");
+    if (listEl && emptyEl && listEl.children.length === 0) {
+      emptyEl.style.display = "";
+    }
+  }, 180);
+}
+
+async function preparePlaybackItem(itemId: string) {
+  const { serverUrl, username } = getSaved();
+  currentItemId = itemId;
+
+  const item = await getItemCached(serverUrl, username, itemId, true);
+  let files =
+    item?.media?.audioFiles ||
+    item?.media?.episodes ||
+    item?.media?.episodeContent ||
+    item?.media?.tracks ||
+    item?.media?.audioTracks ||
+    [];
+
+  if (!Array.isArray(files)) files = [];
+  currentFiles = files
+    .slice()
+    .sort((a: any, b: any) => (a?.index ?? 0) - (b?.index ?? 0));
+
+  currentChapterRows = [];
+}
+
+function resolvePodcastEpisode(item: any, progressObj: any, episodeId?: string | null, currentTimeHint?: number) {
+  const episodes = Array.isArray(item?.media?.episodes)
+    ? item.media.episodes.slice().sort((a: any, b: any) => (a?.index ?? 0) - (b?.index ?? 0))
+    : [];
+  if (!episodes.length) return null;
+
+  const idCandidates = [
+    episodeId,
+    progressObj?.episodeId,
+    progressObj?.episode?.id,
+    progressObj?.mediaProgress?.episodeId,
+    progressObj?.userMediaProgress?.episodeId,
+    progressObj?.progress?.episodeId,
+    progressObj?.mediaItemId,
+  ].filter(Boolean).map((x: any) => String(x));
+
+  for (const id of idCandidates) {
+    const index = episodes.findIndex((e: any) => String(e?.id) === id);
+    if (index >= 0) {
+      let start = 0;
+      for (let i = 0; i < index; i++) {
+        start += normalizeSecondsMaybe(episodes[i]?.audioFile?.duration || episodes[i]?.duration || episodes[i]?.audioLength || 0);
+      }
+      return { episode: episodes[index], index, start };
+    }
+  }
+
+  if (typeof currentTimeHint === "number" && isFinite(currentTimeHint) && currentTimeHint > 0) {
+    let start = 0;
+    for (let i = 0; i < episodes.length; i++) {
+      const dur = normalizeSecondsMaybe(episodes[i]?.audioFile?.duration || episodes[i]?.duration || episodes[i]?.audioLength || 0);
+      if (dur > 0 && currentTimeHint >= start && currentTimeHint < start + dur) {
+        return { episode: episodes[i], index: i, start };
+      }
+      start += dur;
+    }
+  }
+
+  return null;
+}
+
 /* ---------------- Home ---------------- */
 async function loadHome() {
   const { serverUrl, username } = getSaved();
   setMsg("homeMsg", "", "none");
+  itemCacheById.clear();
 
   const me = await invoke<Json>("abs_get_me", { serverUrl, username });
   const inProgress = await invoke<any>("abs_get_items_in_progress", { serverUrl, username });
   const libraries = await invoke<Json>("abs_get_libraries", { serverUrl, username });
   lastInProgress = inProgress;
 
-  el("whoami").textContent = `Signed in as ${me?.username ?? username}`;
+  el("whoami").textContent = tr("home.signedInAs", { name: me?.username ?? username });
 
   progressByItemId.clear();
 
@@ -531,7 +1020,7 @@ async function renderLibraries(libraries: any) {
     const grid = el("libraryItemsView");
     grid.classList.add("loading");
     currentLibraryId = select.value;
-    setMsg("homeMsg", "Loading library…", "none");
+    setMsg("homeMsg", tr("home.loadingLibrary"), "none");
 
     try {
       const items = await invoke<any>("abs_get_library_items", {
@@ -539,6 +1028,7 @@ async function renderLibraries(libraries: any) {
       });
 
       const selected = libsArr.find((x) => String(x.id) === currentLibraryId);
+      currentLibraryMediaType = selected?.mediaType ?? selected?.type ?? null;
       showLibraryItems(selected?.name ?? "Library", items);
 
       // Uppdatera continue-lista med filtrering per bibliotek
@@ -674,8 +1164,35 @@ function getBestProgressPercentFromInProgress(inProgressObj: any): number {
 }
 
 /* ---------------- Continue Listening ---------------- */
-// ---------------- Global map för intervall ----------------
-const intervalByItemId = new Map<string, number>();
+// Shared ticker for continue cards to reduce timer overhead on Wayland/NVIDIA.
+const continueCardMetaByKey = new Map<string, { itemId: string; duration: number; bar: HTMLDivElement }>();
+let continueTicker: any = null;
+
+function startContinueTicker() {
+  if (continueTicker) return;
+  continueTicker = setInterval(() => {
+    const audio = document.getElementById("player") as HTMLAudioElement | null;
+    if (!audio || audio.paused || !currentItemId) return;
+
+    const isPodcast = currentFiles[0]?.audioFile !== undefined;
+    const activeKey = progressKey(currentItemId, isPodcast ? currentEpisodeId : null);
+    const fallbackKey = progressKey(currentItemId, null);
+    const meta = continueCardMetaByKey.get(activeKey) || continueCardMetaByKey.get(fallbackKey);
+    if (!meta || !meta.duration) return;
+
+    const current = isPodcast
+      ? audio.currentTime
+      : audio.currentTime + (getChapterStart(currentChapterIndex) || 0);
+
+    let pct = (current / meta.duration) * 100;
+    if (pct > 0 && pct < 5) pct = 5;
+    if (!isFinite(pct) || pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+
+    meta.bar.style.width = pct + "%";
+    progressByItemId.set(activeKey, { currentTime: current });
+  }, 500);
+}
 
 async function renderContinueListening(inProgress: any) {
 
@@ -685,8 +1202,7 @@ async function renderContinueListening(inProgress: any) {
   listEl.innerHTML = "";
   emptyEl.style.display = "none";
 
-  intervalByItemId.forEach(id => clearInterval(id));
-  intervalByItemId.clear();
+  continueCardMetaByKey.clear();
 
   if (!currentLibraryItemIds.size) {
 
@@ -700,28 +1216,30 @@ async function renderContinueListening(inProgress: any) {
   else allProgress = extractInProgressArray(inProgress) || [];
 
   const filteredProgress: any[] = [];
-  const byItemId = new Map<string, any>();
+  const byProgressKey = new Map<string, any>();
 
   for (const p of allProgress) {
     const id = getItemId(p);
     if (!id) continue;
+    const epId = getEpisodeIdForProgress(p);
+    const key = progressKey(id, epId);
 
     // Always scope by the currently loaded library items in this app.
     if (!currentLibraryItemIds.has(id)) continue;
 
     const currentTime = getCurrentTimeForProgress(null, p);
 
-    const prev = byItemId.get(id);
+    const prev = byProgressKey.get(key);
     if (!prev) {
-      byItemId.set(id, p);
+      byProgressKey.set(key, p);
       continue;
     }
 
     const prevTime = getCurrentTimeForProgress(null, prev);
-    if (currentTime >= prevTime) byItemId.set(id, p);
+    if (currentTime >= prevTime) byProgressKey.set(key, p);
   }
 
-  for (const v of byItemId.values()) filteredProgress.push(v);
+  for (const v of byProgressKey.values()) filteredProgress.push(v);
 
   if (!filteredProgress.length) {
     emptyEl.style.display = "";
@@ -731,15 +1249,28 @@ async function renderContinueListening(inProgress: any) {
   emptyEl.style.display = "none";
 
   const { serverUrl, username } = getSaved();
+  const libraryItemById = new Map<string, any>(
+    currentLibraryItems
+      .filter((x: any) => x?.id)
+      .map((x: any) => [String(x.id), x])
+  );
 
   for (const p of filteredProgress) {
 
     const itemId = getItemId(p);
     if (!itemId) continue;
+    const episodeId = getEpisodeIdForProgress(p);
+    const pKey = progressKey(itemId, episodeId);
 
     const card = document.createElement("div");
     card.className = "book-card continue-card";
+    card.classList.add("is-entering");
+    card.dataset.continueKey = pKey;
     listEl.appendChild(card);
+
+    window.requestAnimationFrame(() => {
+      card.classList.remove("is-entering");
+    });
 
     card.innerHTML = `
     <div class="cover-wrap">
@@ -747,36 +1278,52 @@ async function renderContinueListening(inProgress: any) {
     <div class="progress-wrap">
     <div class="progress-bar"></div>
     </div>
+    <button class="continue-play-btn" type="button" title="${escapeHtml(tr("continue.resumeTitle"))}">▶</button>
+    <button class="continue-mark-check" type="button" title="${escapeHtml(tr("continue.markPlayedTitle"))}">✓</button>
     </div>
 
     <div class="book-meta">
     <p class="book-title"></p>
     <p class="book-sub"></p>
-    <button class="continue-mark-played" type="button">Mark as played</button>
     </div>
     `;
 
     const img = card.querySelector(".book-cover") as HTMLImageElement;
     const bar = card.querySelector(".progress-bar") as HTMLDivElement;
-    // Initial visual progress from in-progress payload when available.
-    const initialPct = getBestProgressPercentFromInProgress(p);
-    if (initialPct > 0) {
-      bar.style.width = Math.max(Math.round(initialPct), 5) + "%";
-    } else {
-      bar.style.width = "3%";
-    }
+    // Start neutral and let per-item init set the correct value.
+    bar.style.width = "3%";
 
     const titleEl = card.querySelector(".book-title") as HTMLElement;
     const authorEl = card.querySelector(".book-sub") as HTMLElement;
-    const markPlayedBtn = card.querySelector(".continue-mark-played") as HTMLButtonElement;
+    const playBtn = card.querySelector(".continue-play-btn") as HTMLButtonElement;
+    const markCheckBtn = card.querySelector(".continue-mark-check") as HTMLButtonElement;
 
-    let title = p?.title ?? itemId;
-    let author = p?.author ?? "";
+    const itemPromise = getItemCached(serverUrl, username, itemId);
+    const libItem = libraryItemById.get(itemId);
+    const libTitle = libItem?.media?.metadata?.title ?? "";
+    const libAuthor = libItem?.media?.metadata?.authorName ?? "";
+
+    let title = libTitle || p?.title || itemId;
+    let author = libAuthor || p?.author || "";
 
     try {
-      const item = await invoke<any>("abs_get_item", { serverUrl, username, itemId });
-      title = item?.media?.metadata?.title ?? title;
-      author = item?.media?.metadata?.authorName ?? author;
+      const item = await itemPromise;
+      const isPodcastItem = Array.isArray(item?.media?.episodes);
+      const resolution = isPodcastItem
+        ? resolvePodcastEpisode(item, p, episodeId, getCurrentTimeForProgress(item, p))
+        : null;
+
+      if (isPodcastItem) {
+        if (resolution?.episode) {
+          title = getTrackDisplayName(resolution.episode, resolution.index);
+        } else {
+          title = p?.episode?.title ?? p?.mediaProgress?.episodeTitle ?? p?.episodeTitle ?? episodeId ?? libTitle ?? title;
+        }
+        author = item?.media?.metadata?.title ?? author;
+      } else {
+        title = item?.media?.metadata?.title ?? libTitle ?? title;
+        author = item?.media?.metadata?.authorName ?? libAuthor ?? author;
+      }
     } catch {}
 
     titleEl.textContent = title;
@@ -790,16 +1337,28 @@ async function renderContinueListening(inProgress: any) {
     (async () => {
       try {
         const [item, progressObj] = await Promise.all([
-          invoke<any>("abs_get_item", { serverUrl, username, itemId }),
-          invoke<any>("abs_get_progress", { serverUrl, username, itemId }).catch(() => null),
+          itemPromise,
+          invoke<any>("abs_get_progress", {
+            serverUrl,
+            username,
+            itemId,
+            episodeId
+          }).catch(() => null),
         ]);
-        let duration = sumDurationsFromItem(item);
+        const isPodcastItem = Array.isArray(item?.media?.episodes);
+        const resolution = isPodcastItem
+          ? resolvePodcastEpisode(item, progressObj ?? p, episodeId)
+          : null;
+        const episode = resolution?.episode ?? null;
+
+        let duration = isPodcastItem
+          ? normalizeSecondsMaybe(episode?.audioFile?.duration || episode?.duration || 0)
+          : sumDurationsFromItem(item);
 
         if (!duration || duration < 60) {
-          duration = item?.media?.duration ||
-          item?.media?.metadata?.duration ||
-          item?.media?.durationSeconds ||
-          3600
+          duration = isPodcastItem
+            ? normalizeSecondsMaybe(item?.media?.duration || item?.media?.durationSeconds || 3600)
+            : item?.media?.duration || item?.media?.metadata?.duration || item?.media?.durationSeconds || 3600
         }
 
         duration = normalizeSecondsMaybe(duration);
@@ -812,7 +1371,22 @@ async function renderContinueListening(inProgress: any) {
           currentTime = getCurrentTimeForProgress(item, p, duration);
         }
 
-        progressByItemId.set(itemId, { currentTime });
+        if (isPodcastItem && resolution && duration > 0) {
+          const epStart = resolution.start;
+          // Some payloads are absolute in podcast timeline; convert to episode-local when possible.
+          if (currentTime > duration && currentTime >= epStart && currentTime <= epStart + duration + 5) {
+            currentTime = currentTime - epStart;
+          }
+          if (currentTime > duration * 1.2) {
+            currentTime = 0;
+          }
+        }
+
+        if (isPodcastItem && duration > 0) {
+          currentTime = Math.max(0, Math.min(currentTime, duration));
+        }
+
+        progressByItemId.set(pKey, { currentTime });
 
         let pct = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -823,14 +1397,16 @@ async function renderContinueListening(inProgress: any) {
           if (currentTime <= 0) currentTime = duration * frac;
         }
 
-        const fraction = getBestProgressFraction(item, p);
-        if (fraction > 0) {
-          pct = Math.max(pct, fraction * 100);
-          if (currentTime <= 0) currentTime = duration * fraction;
-        }
+        if (!isPodcastItem) {
+          const fraction = getBestProgressFraction(item, p);
+          if (fraction > 0) {
+            pct = Math.max(pct, fraction * 100);
+            if (currentTime <= 0) currentTime = duration * fraction;
+          }
 
-        // Strong payload-first fallback when per-item fields are sparse.
-        pct = Math.max(pct, getBestProgressPercentFromInProgress(p));
+          // Strong payload-first fallback when per-item fields are sparse.
+          pct = Math.max(pct, getBestProgressPercentFromInProgress(p));
+        }
 
         // Keep very small but valid progress visible.
         if (currentTime > 0 && pct <= 0) pct = 2;
@@ -840,30 +1416,13 @@ async function renderContinueListening(inProgress: any) {
 
         // Do not regress an already visible bar to 0 due sparse payload race.
         const existingPct = parseFloat((bar.style.width || "0").replace("%", "")) || 0;
-        if (pct <= 0 && existingPct > 0) {
+        if (!isPodcastItem && pct <= 0 && existingPct > 0) {
           pct = existingPct;
         }
 
         bar.style.width = pct + "%";
 
-        const audio = el<HTMLAudioElement>("player");
-
-        const intervalId = setInterval(() => {
-          if (audio.src && !audio.paused && currentItemId === itemId) {
-
-            const cur = audio.currentTime;
-            progressByItemId.set(itemId, { currentTime: cur });
-
-            let pct = duration > 0 ? (cur / duration) * 100 : 0;
-            if (pct > 0 && pct < 5) pct = 5;
-            if (!isFinite(pct) || pct < 0) pct = 0;
-            if (pct > 100) pct = 100;
-
-            bar.style.width = pct + "%";
-          }
-        }, 500);
-
-        intervalByItemId.set(itemId, intervalId);
+        continueCardMetaByKey.set(pKey, { itemId, duration, bar });
 
       } catch (e) {
         // Keep the initial in-progress-based fill if item details fail to load.
@@ -871,35 +1430,53 @@ async function renderContinueListening(inProgress: any) {
       }
     })();
 
-    card.onclick = async () => {
+    playBtn.onclick = async (ev) => {
+      ev.stopPropagation();
 
-      const progress = progressByItemId.get(itemId);
+      const progress = progressByItemId.get(pKey);
       const serverTime = progress?.currentTime || 0;
+      const clickedEpisodeId = episodeId;
 
-      await showItemDetail(itemId);
+      await preparePlaybackItem(itemId);
+
+      if (clickedEpisodeId) {
+        const episodeIndex = currentFiles.findIndex((x: any) => String(x?.id) === clickedEpisodeId);
+        if (episodeIndex >= 0) {
+          forcedSeekTime = serverTime;
+          await playChapter(itemId, episodeIndex, true);
+          return;
+        }
+      }
 
       const pos = getChapterIndexFromTime(serverTime);
       forcedSeekTime = pos.offset;
 
-      await playChapter(itemId, pos.index);
+      await playChapter(itemId, pos.index, true);
     };
 
-    markPlayedBtn.onclick = async (ev) => {
+    card.onclick = async () => {
+      await showItemDetail(itemId);
+    };
+
+    markCheckBtn.onclick = async (ev) => {
       ev.stopPropagation();
       try {
-        await invoke("abs_mark_played", { serverUrl, username, itemId });
+        await invoke("abs_mark_played", { serverUrl, username, itemId, episodeId });
 
         // Clear local progress cache so it reflects the reset state
-        progressByItemId.set(itemId, { currentTime: 0 });
+        progressByItemId.set(pKey, { currentTime: 0 });
+        removeContinueCard(itemId, episodeId);
+        setLibraryItemDoneState(itemId, true);
 
         // Refresh from server and rerender current library continue list
         lastInProgress = await invoke<any>("abs_get_items_in_progress", { serverUrl, username });
-        await renderContinueListening(lastInProgress);
       } catch (e) {
         console.log("mark played fail", e)
       }
     };
   }
+
+  startContinueTicker();
 }
 
 /* ---------------- Library grid ---------------- */
@@ -908,12 +1485,16 @@ function showLibraryItems(name: string, items: any) {
   currentLibraryItemIds = new Set(currentLibraryItems.map((x: any) => String(x?.id)).filter(Boolean));
   setMsg("homeMsg", "", "none");
   const total = el("libraryTotal");
-  if (total) total.textContent = `${name} — ${currentLibraryItems.length} book${currentLibraryItems.length === 1 ? "" : "s"}`;
+  if (total) {
+    const noun = currentLibraryItems.length === 1 ? tr("label.book.singular") : tr("label.book.plural");
+    total.textContent = `${name} - ${currentLibraryItems.length} ${noun}`;
+  }
   void renderLibraryGrid();
 }
 
 function wireSortSelect() {
   const sortSelect = el<HTMLSelectElement>("sortSelect");
+  sortSelect.value = appSettings.defaultSort;
   sortSelect.addEventListener("change", () => { if (currentLibraryItems.length) void renderLibraryGrid(); });
 }
 
@@ -929,6 +1510,7 @@ async function renderLibraryGrid() {
   if (sort === "za") list.sort((a,b) => (b?.media?.metadata?.title ?? "").localeCompare(a?.media?.metadata?.title ?? "", "sv", { sensitivity: "base" }));
 
   const { serverUrl, username } = getSaved();
+  const isPodcastLibrary = String(currentLibraryMediaType || "").toLowerCase() === "podcast";
 
   for (const it of list) {
     const itemId = it?.id;
@@ -940,9 +1522,108 @@ async function renderLibraryGrid() {
     const card = document.createElement("div");
     card.className = "book-card";
 
+    const coverWrap = document.createElement("div");
+    coverWrap.style.position = "relative";
+
     const img = document.createElement("img");
     img.className = "book-cover"; img.loading = "lazy"; img.alt = title;
-    try { img.src = await invoke<string>("abs_get_cover_url", { serverUrl, username, itemId }); } catch {}
+    invoke<string>("abs_get_cover_url", { serverUrl, username, itemId })
+      .then((url) => { img.src = url; })
+      .catch(() => {});
+
+    const doneBadge = document.createElement("div");
+    doneBadge.textContent = "✓";
+    doneBadge.style.position = "absolute";
+    doneBadge.style.top = "8px";
+    doneBadge.style.right = "8px";
+    doneBadge.style.width = "22px";
+    doneBadge.style.height = "22px";
+    doneBadge.style.borderRadius = "999px";
+    doneBadge.style.display = "none";
+    doneBadge.style.alignItems = "center";
+    doneBadge.style.justifyContent = "center";
+    doneBadge.style.background = "#2e7d32";
+    doneBadge.style.color = "#fff";
+    doneBadge.style.fontWeight = "800";
+    doneBadge.style.fontSize = "14px";
+    doneBadge.dataset.libraryDoneItem = String(itemId);
+
+    const menuBtn = document.createElement("button");
+    menuBtn.type = "button";
+    menuBtn.textContent = "⋯";
+    menuBtn.style.position = "absolute";
+    menuBtn.style.right = "8px";
+    menuBtn.style.bottom = "8px";
+    menuBtn.style.margin = "0";
+    menuBtn.style.width = "28px";
+    menuBtn.style.height = "28px";
+    menuBtn.style.padding = "0";
+    menuBtn.style.borderRadius = "999px";
+    menuBtn.style.border = "1px solid rgba(255,255,255,.24)";
+    menuBtn.style.background = "rgba(0,0,0,.55)";
+    menuBtn.style.color = "#fff";
+    menuBtn.style.fontSize = "18px";
+    menuBtn.style.lineHeight = "1";
+    menuBtn.style.cursor = "pointer";
+
+    const menu = document.createElement("div");
+    menu.style.position = "absolute";
+    menu.style.right = "8px";
+    menu.style.bottom = "40px";
+    menu.style.display = "none";
+    menu.style.flexDirection = "column";
+    menu.style.gap = "6px";
+    menu.style.minWidth = "150px";
+    menu.style.padding = "8px";
+    menu.style.border = "1px solid rgba(255,255,255,.2)";
+    menu.style.borderRadius = "10px";
+    menu.style.background = "rgba(20,22,24,.96)";
+    menu.style.zIndex = "4";
+
+    const markPlayedBtn = document.createElement("button");
+    markPlayedBtn.type = "button";
+    markPlayedBtn.textContent = tr("menu.markPlayed");
+    markPlayedBtn.style.margin = "0";
+    markPlayedBtn.style.padding = "8px 10px";
+    markPlayedBtn.style.fontSize = "13px";
+    markPlayedBtn.style.border = "1px solid rgba(255,255,255,.18)";
+    markPlayedBtn.style.borderRadius = "8px";
+    markPlayedBtn.style.background = "rgba(255,255,255,.08)";
+    markPlayedBtn.style.color = "inherit";
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.textContent = tr("menu.resetUnplayed");
+    resetBtn.style.margin = "0";
+    resetBtn.style.padding = "8px 10px";
+    resetBtn.style.fontSize = "13px";
+    resetBtn.style.border = "1px solid rgba(255,255,255,.18)";
+    resetBtn.style.borderRadius = "8px";
+    resetBtn.style.background = "rgba(255,255,255,.08)";
+    resetBtn.style.color = "inherit";
+
+    menu.append(markPlayedBtn, resetBtn);
+
+    menuBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      menu.style.display = menu.style.display === "none" ? "flex" : "none";
+    };
+
+    markPlayedBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      await invoke("abs_mark_played", { serverUrl, username, itemId, episodeId: null });
+      menu.style.display = "none";
+      setLibraryItemDoneState(String(itemId), true);
+      scheduleContinueRefresh(0);
+    };
+
+    resetBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      await invoke("abs_mark_unplayed", { serverUrl, username, itemId, episodeId: null });
+      menu.style.display = "none";
+      setLibraryItemDoneState(String(itemId), false);
+      scheduleContinueRefresh(0);
+    };
 
     const meta = document.createElement("div");
     meta.className = "book-meta";
@@ -954,9 +1635,16 @@ async function renderLibraryGrid() {
     `;
 
     (meta.children[0] as HTMLElement).textContent = title;
-    (meta.children[1] as HTMLElement).textContent = author;
+    (meta.children[1] as HTMLElement).textContent = isPodcastLibrary ? (it?.media?.metadata?.author ?? "") : author;
 
-    card.append(img, meta);
+    invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId: null })
+      .then((p) => {
+        if (isFinishedProgress(p)) doneBadge.style.display = "flex";
+      })
+      .catch(() => {});
+
+    coverWrap.append(img, doneBadge, menuBtn, menu);
+    card.append(coverWrap, meta);
     card.onclick = () => showItemDetail(String(itemId));
     container.appendChild(card);
   }
@@ -1004,16 +1692,30 @@ async function showItemDetail(itemId: string) {
   show(el("libraryItemsView"), false);
   show(el("itemDetailView"), true);
 
-  const item = await invoke<any>("abs_get_item", { serverUrl, username, itemId });
-  const title = item?.media?.metadata?.title ?? "Item";
+  const item = await getItemCached(serverUrl, username, itemId, true);
+  const isPodcastItem = Array.isArray(item?.media?.episodes);
+  const title = item?.media?.metadata?.title ?? tr("common.item");
   const author = item?.media?.metadata?.authorName ?? "";
   const desc = item?.media?.metadata?.description ?? "";
+
+  hasStartedPlayback = false;
+  currentItemFinished = false;
+
+  if (!isPodcastItem) {
+    try {
+      const itemProgress = await invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId: null });
+      currentItemFinished = isFinishedProgress(itemProgress);
+      if (currentItemFinished) progressByItemId.set(itemId, { currentTime: 0 });
+    } catch {}
+  }
 
   let coverUrl = "";
   try { coverUrl = await invoke<string>("abs_get_cover_url", { serverUrl, username, itemId }); } catch {}
 
   const startAt = progressByItemId.get(itemId)?.currentTime ?? 0;
-  const playLabel = startAt > 0 ? "▶ Resume" : "▶ Play";
+  const playLabel = currentItemFinished
+    ? `▶ ${tr("common.playAgain")}`
+    : (startAt > 0 ? `▶ ${tr("common.resume")}` : `▶ ${tr("common.play")}`);
 
   const detail = el<HTMLDivElement>("itemDetailView");
   detail.innerHTML = `
@@ -1021,7 +1723,7 @@ async function showItemDetail(itemId: string) {
   <div class="detail-layout">
 
   <div class="detail-actions">
-  <button id="backBtn">← Back</button>
+  <button id="backBtn">← ${tr("common.back")}</button>
   <button id="resumeBtn">${playLabel}</button>
   </div>
 
@@ -1130,22 +1832,126 @@ async function showItemDetail(itemId: string) {
     row.style.borderBottom = "1px solid rgba(255,255,255,.05)";
 
     const left = document.createElement("div");
-    left.textContent = f?.title || f?.metadata?.title || f?.filename || `Track ${i + 1}`;
+    left.textContent = getTrackDisplayName(f, i);
 
     // Handle both audiobook files (duration) and podcast episodes (audioFile.duration)
     const episodeDuration = f?.duration || f?.audioFile?.duration || f?.audioLength || 0;
 
     const right = document.createElement("div");
-    right.style.opacity = "0.7";
-    right.textContent = fmt(episodeDuration);
+    right.style.display = "flex";
+    right.style.alignItems = "center";
+    right.style.gap = "8px";
 
+    const durEl = document.createElement("div");
+    durEl.style.opacity = "0.7";
+    durEl.textContent = fmt(episodeDuration);
+
+    const done = document.createElement("div");
+    done.textContent = "✓";
+    done.style.display = "none";
+    done.style.width = "20px";
+    done.style.height = "20px";
+    done.style.borderRadius = "999px";
+    done.style.alignItems = "center";
+    done.style.justifyContent = "center";
+    done.style.background = "#2e7d32";
+    done.style.color = "#fff";
+    done.style.fontWeight = "800";
+    done.style.fontSize = "13px";
+
+    const rowMenuBtn = document.createElement("button");
+    rowMenuBtn.type = "button";
+    rowMenuBtn.textContent = "⋯";
+    rowMenuBtn.style.margin = "0";
+    rowMenuBtn.style.width = "24px";
+    rowMenuBtn.style.height = "24px";
+    rowMenuBtn.style.padding = "0";
+    rowMenuBtn.style.borderRadius = "999px";
+    rowMenuBtn.style.border = "1px solid rgba(255,255,255,.2)";
+    rowMenuBtn.style.background = "rgba(255,255,255,.08)";
+    rowMenuBtn.style.color = "inherit";
+    rowMenuBtn.style.cursor = "pointer";
+
+    const rowMenu = document.createElement("div");
+    rowMenu.style.display = "none";
+    rowMenu.style.position = "absolute";
+    rowMenu.style.right = "10px";
+    rowMenu.style.marginTop = "30px";
+    rowMenu.style.padding = "8px";
+    rowMenu.style.borderRadius = "8px";
+    rowMenu.style.border = "1px solid rgba(255,255,255,.2)";
+    rowMenu.style.background = "rgba(20,22,24,.96)";
+    rowMenu.style.zIndex = "6";
+
+    const rowMarkPlayed = document.createElement("button");
+    rowMarkPlayed.type = "button";
+    rowMarkPlayed.textContent = tr("menu.markPlayed");
+    rowMarkPlayed.style.margin = "0";
+    rowMarkPlayed.style.padding = "6px 8px";
+    rowMarkPlayed.style.fontSize = "12px";
+    rowMarkPlayed.style.borderRadius = "6px";
+    rowMarkPlayed.style.border = "1px solid rgba(255,255,255,.18)";
+    rowMarkPlayed.style.background = "rgba(255,255,255,.08)";
+    rowMarkPlayed.style.color = "inherit";
+
+    const rowReset = document.createElement("button");
+    rowReset.type = "button";
+    rowReset.textContent = tr("menu.resetUnplayed");
+    rowReset.style.margin = "6px 0 0 0";
+    rowReset.style.padding = "6px 8px";
+    rowReset.style.fontSize = "12px";
+    rowReset.style.borderRadius = "6px";
+    rowReset.style.border = "1px solid rgba(255,255,255,.18)";
+    rowReset.style.background = "rgba(255,255,255,.08)";
+    rowReset.style.color = "inherit";
+
+    rowMenu.append(rowMarkPlayed, rowReset);
+
+    row.style.position = "relative";
+
+    rowMenuBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      rowMenu.style.display = rowMenu.style.display === "none" ? "block" : "none";
+    };
+
+    if (isPodcastItem && f?.id) {
+      const episodeId = String(f.id);
+      invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId }).then((epProgress) => {
+        if (isFinishedProgress(epProgress)) done.style.display = "flex";
+      }).catch(() => {});
+
+      rowMarkPlayed.onclick = async (ev) => {
+        ev.stopPropagation();
+        await invoke("abs_mark_played", { serverUrl, username, itemId, episodeId });
+        done.style.display = "flex";
+        rowMenu.style.display = "none";
+        setLibraryItemDoneState(String(itemId), true);
+        scheduleContinueRefresh(0);
+        removeContinueCard(itemId, episodeId);
+      };
+
+      rowReset.onclick = async (ev) => {
+        ev.stopPropagation();
+        await invoke("abs_mark_unplayed", { serverUrl, username, itemId, episodeId });
+        done.style.display = "none";
+        rowMenu.style.display = "none";
+        setLibraryItemDoneState(String(itemId), false);
+        scheduleContinueRefresh(0);
+      };
+    } else {
+      rowMenuBtn.style.display = "none";
+      rowMenu.style.display = "none";
+    }
+
+    right.append(durEl, done, rowMenuBtn);
     row.appendChild(left);
     row.appendChild(right);
+    row.appendChild(rowMenu);
     list.appendChild(row);
     row.style.cursor = "pointer";
 
     row.onclick = async () => {
-      await playChapter(itemId, i);
+      await playChapter(itemId, i, true);
     };
   }
 
@@ -1225,7 +2031,7 @@ function getChapterIndexFromTime(time: number): { index: number, offset: number 
   }
 }
 
-async function playChapter(itemId: string, index: number) {
+async function playChapter(itemId: string, index: number, openNowPlaying = false) {
 
   if (isLoadingChapter) return;
   isLoadingChapter = true;
@@ -1261,6 +2067,9 @@ async function playChapter(itemId: string, index: number) {
 
     currentChapterIndex = index;
     currentItemId = itemId;
+    currentEpisodeId = currentFiles[index]?.audioFile !== undefined ? (currentFiles[index]?.id ?? null) : null;
+    hasStartedPlayback = true;
+    currentItemFinished = false;
     highlightChapter(index)
 
     const audio = el<HTMLAudioElement>("player");
@@ -1286,13 +2095,14 @@ async function playChapter(itemId: string, index: number) {
     await new Promise(resolve => setTimeout(resolve, 100));
     
     audio.src = url;
-    el("miniLoading").style.display = "block"
+    beginPlaybackLoading(audio)
     audio.preload = "auto"
     
     // Add error handler with recovery
     audio.onerror = () => {
       console.log("AUDIO ERROR:", audio.error?.message, "Code:", audio.error?.code);
-      el("miniLoading").style.display = "none"
+      playbackLoadingActive = false;
+      setPlaybackLoading(false);
       isLoadingChapter = false; // Allow user to retry
     };
     
@@ -1306,6 +2116,9 @@ async function playChapter(itemId: string, index: number) {
 
       }
 
+      // Ignore seek jumps when deciding if loading can be hidden.
+      resetPlaybackLoadingAnchor(audio)
+
       try {
         await audio.play()
       } catch (e) {
@@ -1315,6 +2128,7 @@ async function playChapter(itemId: string, index: number) {
     }
 
     setPlaybackButtons(true)
+    if (openNowPlaying) openNowPlayingPanel();
     try{
 
       // For podcasts, use cached data; for audiobooks, fetch fresh data
@@ -1330,7 +2144,7 @@ async function playChapter(itemId: string, index: number) {
         author = "" // podcasts don't have author on episode level
       } else {
         // For audiobooks, fetch full item data
-        const item = await invoke<any>("abs_get_item",{serverUrl,username,itemId})
+        const item = await getItemCached(serverUrl, username, itemId)
         title = currentFile?.title || item?.media?.metadata?.title || ""
         author = item?.media?.metadata?.authorName || ""
       }
@@ -1391,11 +2205,12 @@ async function playChapter(itemId: string, index: number) {
 
         await forceSaveProgress()
 
-        // Sync on pause - skip for podcasts due to server issues
         const isPodcast = currentFiles[0]?.audioFile !== undefined;
-        if (currentSessionId && !isPodcast) {
+        if (currentSessionId) {
 
-          const absolute = audio.currentTime + getChapterStart(currentChapterIndex)
+          const absolute = isPodcast
+            ? audio.currentTime
+            : audio.currentTime + getChapterStart(currentChapterIndex)
 
           await invoke("abs_sync_session", {
             serverUrl,
@@ -1406,26 +2221,7 @@ async function playChapter(itemId: string, index: number) {
 
         }
 
-        // ⭐⭐⭐ NYTT — vänta innan Continue refresh ⭐⭐⭐
-        setTimeout(async () => {
-
-          try {
-
-            const { serverUrl, username } = getSaved()
-
-            lastInProgress =
-            await invoke("abs_get_items_in_progress", {
-              serverUrl,
-              username
-            })
-
-            await renderContinueListening(lastInProgress)
-
-          } catch (e) {
-            console.log("continue refresh fail", e)
-          }
-
-        }, 2000)
+        scheduleContinueRefresh(1200)
     }
 
     // starta playback session
@@ -1437,7 +2233,8 @@ async function playChapter(itemId: string, index: number) {
       const playRes: any = await invoke("abs_start_playback", {
         serverUrl,
         username,
-        itemId
+        itemId,
+        episodeId: isPodcast ? currentEpisodeId : null
       })
 
       currentSessionId =
@@ -1445,9 +2242,7 @@ async function playChapter(itemId: string, index: number) {
       playRes?.session?.id ||
       null
 
-      // ⭐⭐⭐ LÄGG TILL DETTA ⭐⭐⭐
-      if (currentSessionId && !isPodcast) {
-        // For audiobooks only - podcasts skip initial sync to avoid server overload
+      if (currentSessionId) {
         setTimeout(async () => {
           try {
             await invoke("abs_sync_session", {
@@ -1462,28 +2257,28 @@ async function playChapter(itemId: string, index: number) {
         }, 0);
       }
 
-      // ⭐ INITIAL PROGRESS SAVE (gör så item hamnar i Continue)
-      if (!isPodcast) {
-        // For audiobooks only - save progress
-        setTimeout(async () => {
+      // ⭐ INITIAL PROGRESS SAVE
+      setTimeout(async () => {
 
-          if (!currentItemId) return
+        if (!currentItemId) return
 
-            const audio = el<HTMLAudioElement>("player")
+          const audio = el<HTMLAudioElement>("player")
+          const isPodcastNow = currentFiles[0]?.audioFile !== undefined;
+          const absolute = isPodcastNow
+            ? audio.currentTime
+            : audio.currentTime + getChapterStart(currentChapterIndex)
 
-            const absolute = audio.currentTime + getChapterStart(currentChapterIndex)
+          const { serverUrl, username } = getSaved()
 
-            const { serverUrl, username } = getSaved()
+          await invoke("abs_update_progress", {
+            serverUrl,
+            username,
+            itemId: currentItemId,
+            currentTime: absolute,
+            episodeId: isPodcastNow ? currentEpisodeId : null
+          })
 
-            await invoke("abs_update_progress", {
-              serverUrl,
-              username,
-              itemId: currentItemId,
-              currentTime: absolute
-            })
-
-        }, 3000);
-      }
+      }, 3000);
 
     } catch (e) {
       console.log("session start fail", e)
@@ -1513,25 +2308,22 @@ async function playChapter(itemId: string, index: number) {
         const now = Date.now()
         const { serverUrl, username } = getSaved()
 
-        // LIVE session sync - DISABLED for podcasts to avoid 502 errors
         const isPodcast = currentFiles[0]?.audioFile !== undefined;
-        
-        if (!isPodcast) {
-          // Audiobooks only
-          const syncInterval = 10000;
-          
-          if (currentSessionId && now - lastSessionSync > syncInterval) {
-            lastSessionSync = now
 
-            const absolute = audio.currentTime + getChapterStart(currentChapterIndex);
+        const syncInterval = 10000;
+        if (currentSessionId && now - lastSessionSync > syncInterval) {
+          lastSessionSync = now
 
-            invoke("abs_sync_session", {
-              serverUrl,
-              username,
-              sessionId: currentSessionId,
-              currentTime: absolute
-            }).catch(console.error)
-          }
+          const absolute = isPodcast
+            ? audio.currentTime
+            : audio.currentTime + getChapterStart(currentChapterIndex);
+
+          invoke("abs_sync_session", {
+            serverUrl,
+            username,
+            sessionId: currentSessionId,
+            currentTime: absolute
+          }).catch(console.error)
         }
 
         // Save progress for both audiobooks and podcasts (podcasts less frequent).
@@ -1547,7 +2339,8 @@ async function playChapter(itemId: string, index: number) {
             serverUrl,
             username,
             itemId: currentItemId,
-            currentTime: absolute
+            currentTime: absolute,
+            episodeId: isPodcast ? currentEpisodeId : null
           }).catch(console.error)
         }
     }
@@ -1615,21 +2408,13 @@ async function forceSaveProgress() {
         serverUrl,
         username,
         itemId: currentItemId,
-        currentTime: absolute
+        currentTime: absolute,
+        episodeId: isPodcast ? currentEpisodeId : null
       })
 
       // ⭐ hämta ny Continue-data direkt från servern (skip for podcasts to avoid 502s)
       if (!isPodcast) {
-        const inProgress =
-        await invoke<any>("abs_get_items_in_progress", {
-          serverUrl,
-          username
-        })
-
-        lastInProgress = inProgress
-
-        // ⭐ rendera om Continue-listan
-        await renderContinueListening(lastInProgress)
+        scheduleContinueRefresh(0)
       }
 
     } catch (e) {
@@ -1673,10 +2458,32 @@ async function showAppVersion() {
 
 async function boot() {
 
+  applySettings();
+
   const audio = el<HTMLAudioElement>("player")
   audio.volume = 0.8
+  audio.addEventListener("timeupdate", () => {
+    maybeEndPlaybackLoading(audio);
+  })
   audio.addEventListener("playing", () => {
-    el("miniLoading").style.display = "none"
+    maybeEndPlaybackLoading(audio);
+  })
+  audio.addEventListener("play", () => {
+    setPlaybackButtons(true);
+  })
+  audio.addEventListener("pause", () => {
+    setPlaybackButtons(false);
+    playbackLoadingActive = false;
+    setPlaybackLoading(false);
+  })
+  audio.addEventListener("ended", () => {
+    setPlaybackButtons(false);
+    playbackLoadingActive = false;
+    setPlaybackLoading(false);
+  })
+  audio.addEventListener("error", () => {
+    playbackLoadingActive = false;
+    setPlaybackLoading(false);
   })
 
   el<HTMLInputElement>("miniVolume").value = "0.8"

@@ -26,15 +26,15 @@
           <img src="/src/assets/bookstory-logo.svg" alt="Bookstory" class="login-logo" />
           <h1>Bookstory</h1>
         </div>
-        <p class="subtitle">Connect to your Audiobookshelf server</p>
+        <p id="loginSubtitle" class="subtitle">Connect to your Audiobookshelf server</p>
 
-        <label for="server">Server address</label>
+        <label id="serverLabel" for="server">Server address</label>
         <input id="server" type="text" />
 
-        <label for="username">Username</label>
+        <label id="usernameLabel" for="username">Username</label>
         <input id="username" type="text" />
 
-        <label for="password">Password</label>
+        <label id="passwordLabel" for="password">Password</label>
         <input id="password" type="password" />
 
         <button id="loginBtn">Sign in</button>
@@ -48,7 +48,7 @@
 
       <!-- TOP BAR (full width) -->
       <div class="topbar">
-        <h1>Bookstory</h1>
+        <h1 id="topbarTitle">Bookstory</h1>
         <div id="topbarBrand" aria-hidden="true">
           <img src="/src/assets/bookstory-logo.svg" alt="" />
         </div>
@@ -60,16 +60,17 @@
 
         <!-- SIDEBAR -->
         <aside id="sidebar">
-          <h3>Library</h3>
+          <h3 id="sidebarLibraryLabel">Library</h3>
           <select id="librarySelect" size="8"></select>
 
-          <h3>Sort</h3>
+          <h3 id="sidebarSortLabel">Sort</h3>
           <select id="sortSelect">
             <option value="recent">Recently added</option>
             <option value="az">A → Z</option>
             <option value="za">Z → A</option>
           </select>
 
+          <button id="settingsBtn" style="margin-top:12px;">Settings</button>
           <button id="logoutBtn" style="margin-top:12px;">Log out</button>
           <div id="whoami" class="sidebar-whoami"></div>
 
@@ -78,7 +79,7 @@
         <!-- MAIN CONTENT -->
         <main id="mainContent">
           <section id="continueSection">
-            <h2>Continue Listening</h2>
+            <h2 id="continueHeading">Continue Listening</h2>
             <div id="continueList" class="list"></div>
             <div id="continueEmpty" class="hint" style="display:none;">
               Nothing in progress yet.
@@ -88,6 +89,7 @@
           <div id="libraryTotal" class="library-total"></div>
           <div id="libraryItemsView"></div>
           <div id="itemDetailView" style="display:none;"></div>
+          <div id="settingsView" style="display:none;"></div>
           <div id="homeMsg" class="msg"></div>
         </main>
 
@@ -143,8 +145,12 @@
 
   <img id="npCover" />
 
-  <div id="npTitle"></div>
+  <div id="npTitleRow">
+    <div id="npTitle"></div>
+    <div id="npLoading" class="mini-loading np-loading"></div>
+  </div>
   <div id="npAuthor"></div>
+  <div id="npLoadingText" class="np-loading-text" style="display:none;">Buffering...</div>
 
   <input id="npSeek" type="range" min="0" max="100" value="0" />
 

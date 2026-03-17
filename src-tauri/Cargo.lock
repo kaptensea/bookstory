@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "bookstory"
-version = "0.6.3"
+version = "0.6.5"
 dependencies = [
  "axum",
  "keyring",

@@ -388,10 +388,15 @@ async fn abs_get_progress(
     server_url: String,
     username: String,
     item_id: String,
+    episode_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
-    let url = format!("{}/api/me/progress/{}", server_url, item_id);
+    let url = if let Some(ref ep_id) = episode_id {
+        format!("{}/api/me/progress/{}/{}", server_url, item_id, ep_id)
+    } else {
+        format!("{}/api/me/progress/{}", server_url, item_id)
+    };
 
     let resp = reqwest::Client::new()
     .get(url)
@@ -530,12 +535,17 @@ async fn abs_start_playback(
     server_url: String,
     username: String,
     item_id: String,
+    episode_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
 
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
 
-    let url = format!("{}/api/items/{}/play", server_url, item_id);
+    let url = if let Some(ref ep_id) = episode_id {
+        format!("{}/api/items/{}/play/{}", server_url, item_id, ep_id)
+    } else {
+        format!("{}/api/items/{}/play", server_url, item_id)
+    };
 
     let body = serde_json::json!({
         "deviceInfo": {
@@ -586,21 +596,42 @@ async fn abs_sync_session(server_url: String, username: String, session_id: Stri
 }
 
 #[tauri::command]
+async fn abs_stop_playback(server_url: String, username: String, session_id: String) -> Result<(), String> {
+    let server_url = normalize_server_url(server_url);
+    let token = get_token_from_keyring(&server_url, &username)?;
+    let url = format!("{}/api/session/{}/close", server_url, session_id);
+
+    let resp = reqwest::Client::new()
+    .post(url)
+    .header("Authorization", format!("Bearer {}", token))
+    .send()
+    .await
+    .map_err(|e| format!("Network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Stop failed (HTTP {}).", resp.status()));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn abs_update_progress(
     server_url: String,
     username: String,
     item_id: String,
     current_time: f64,
+    episode_id: Option<String>,
 ) -> Result<(), String> {
 
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
 
-    let url = format!(
-        "{}/api/me/progress/{}",
-        server_url,
-        item_id
-    );
+    let url = if let Some(ref ep_id) = episode_id {
+        format!("{}/api/me/progress/{}/{}", server_url, item_id, ep_id)
+    } else {
+        format!("{}/api/me/progress/{}", server_url, item_id)
+    };
 
     let body = serde_json::json!({
         "currentTime": current_time
@@ -629,16 +660,17 @@ async fn abs_mark_played(
     server_url: String,
     username: String,
     item_id: String,
+    episode_id: Option<String>,
 ) -> Result<(), String> {
 
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
 
-    let url = format!(
-        "{}/api/me/progress/{}",
-        server_url,
-        item_id
-    );
+    let url = if let Some(ref ep_id) = episode_id {
+        format!("{}/api/me/progress/{}/{}", server_url, item_id, ep_id)
+    } else {
+        format!("{}/api/me/progress/{}", server_url, item_id)
+    };
 
     let body = serde_json::json!({
         "isFinished": true,
@@ -656,6 +688,47 @@ async fn abs_mark_played(
     if !resp.status().is_success() {
         return Err(format!(
             "Mark played failed (HTTP {})",
+            resp.status()
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn abs_mark_unplayed(
+    server_url: String,
+    username: String,
+    item_id: String,
+    episode_id: Option<String>,
+) -> Result<(), String> {
+
+    let server_url = normalize_server_url(server_url);
+    let token = get_token_from_keyring(&server_url, &username)?;
+
+    let url = if let Some(ref ep_id) = episode_id {
+        format!("{}/api/me/progress/{}/{}", server_url, item_id, ep_id)
+    } else {
+        format!("{}/api/me/progress/{}", server_url, item_id)
+    };
+
+    let body = serde_json::json!({
+        "isFinished": false,
+        "progress": 0.0,
+        "currentTime": 0.0
+    });
+
+    let resp = reqwest::Client::new()
+    .patch(url)
+    .header("Authorization", format!("Bearer {}", token))
+    .json(&body)
+    .send()
+    .await
+    .map_err(|e| format!("Network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "Mark unplayed failed (HTTP {})",
             resp.status()
         ));
     }
@@ -715,8 +788,10 @@ pub fn run() {
         abs_get_cover_url,
         abs_start_playback,
         abs_sync_session,
+        abs_stop_playback,
         abs_update_progress,
         abs_mark_played,
+        abs_mark_unplayed,
         abs_set_active_user,
         abs_local_player_url,
         abs_stream_chapter_url,

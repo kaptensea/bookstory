@@ -3,7 +3,7 @@
   <h1>Bookstory</h1>
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
-  ![Version](https://img.shields.io/badge/version-0.6.4-blue)
+  ![Version](https://img.shields.io/badge/version-0.6.5-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
   ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
   ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8D8)
@@ -18,15 +18,19 @@
 - **Item detail view** with chapter list and chapter-level playback
 - **Mini player** docked at the bottom with playback controls
 - **Full-screen Now Playing** view with seek slider and chapter navigation
+- **Auto-open Now Playing** when playback starts (with quick minimize back to mini player)
 - **Progress sync** — listens sessions are synced back to your Audiobookshelf server
+- **Podcast episode progress** synced using episode-aware API endpoints
+- **Mark played / unplayed** in Continue Listening, Library cards, and Podcast episode rows
+- **Settings page** for language, default sort, seek seconds, and continue-card animations
 - **Auto-login** — credentials stored securely in the system keyring
 - **Custom window controls** and native desktop feel
 - **Cover artwork** and metadata display throughout
 
 ## Known Limitations
 
-- Podcast progress saving is currently disabled due to previous sync errors.
-- Audiobook progress saving and syncing still works as expected.
+- AppImage bundling can fail on some newer Linux toolchains due to `strip`/`RELR` compatibility in linuxdeploy.
+- `.deb` and `.rpm` packaging are supported and currently the recommended Linux release artifacts.
 
 ## Metadata Fallbacks
 
