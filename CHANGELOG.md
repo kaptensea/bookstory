@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.6.6 - 2026-03-17
+
+### Fixed
+- Podcast episodes in Continue Listening now display with individual episode titles and correct episode-level progress instead of podcast-level data.
+- Episode progress correctly reflects only the current episode's playback position, not the entire podcast duration.
+
 ## 0.6.5 - 2026-03-17
 
 ### Added
