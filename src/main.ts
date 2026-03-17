@@ -889,6 +889,9 @@ async function renderContinueListening(inProgress: any) {
       try {
         await invoke("abs_mark_played", { serverUrl, username, itemId });
 
+        // Clear local progress cache so it reflects the reset state
+        progressByItemId.set(itemId, { currentTime: 0 });
+
         // Refresh from server and rerender current library continue list
         lastInProgress = await invoke<any>("abs_get_items_in_progress", { serverUrl, username });
         await renderContinueListening(lastInProgress);
