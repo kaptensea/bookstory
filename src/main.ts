@@ -148,6 +148,14 @@ let continueRefreshTimer: any = null
 let continueRefreshInFlight = false
 const itemCacheById = new Map<string, any>();
 const ITEM_CACHE_MAX = 250;
+const podcastDoneCacheByItemId = new Map<string, { done: boolean; ts: number }>();
+const PODCAST_DONE_CACHE_MS = 120000;
+const PODCAST_BADGE_CHECK_TIMEOUT_MS = 5000; // Per-item timeout for slow podcasts
+const PODCAST_BADGE_MAX_RETRIES = 3;
+const podcastBadgeRetries = new Map<string, number>();
+let podcastBadgeQueue: string[] = [];
+let podcastBadgeWorker = false;
+let podcastBadgeRunId = 0;
 let playbackLoadingActive = false;
 let playbackLoadingStartTime = 0;
 let playbackLoadingStartPos = 0;
@@ -840,6 +848,7 @@ function getEpisodeIdForProgress(p: any): string | null {
   const id =
     p?.episodeId ??
     p?.episode?.id ??
+    p?.recentEpisode?.id ??
     p?.mediaProgress?.episodeId ??
     p?.userMediaProgress?.episodeId ??
     p?.progress?.episodeId ??
@@ -870,6 +879,79 @@ function isFinishedProgress(progressObj: any): boolean {
 function setLibraryItemDoneState(itemId: string, done: boolean) {
   const badge = document.querySelector(`[data-library-done-item="${itemId}"]`) as HTMLElement | null;
   if (badge) badge.style.display = done ? "flex" : "none";
+}
+
+async function isPodcastFullyPlayed(serverUrl: string, username: string, itemId: string): Promise<boolean> {
+  const item = await getItemCached(serverUrl, username, itemId, false);
+  const episodes = Array.isArray(item?.media?.episodes)
+    ? item.media.episodes.slice().sort((a: any, b: any) => (a?.index ?? 0) - (b?.index ?? 0))
+    : [];
+
+  if (!episodes.length) return false;
+
+  for (const ep of episodes) {
+    const episodeId = ep?.id ? String(ep.id) : null;
+    if (!episodeId) return false;
+    try {
+      const p = await invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId });
+      if (!isFinishedProgress(p)) return false;
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function refreshPodcastLibraryDoneState(itemId: string) {
+  const { serverUrl, username } = getSaved();
+  const cached = podcastDoneCacheByItemId.get(itemId);
+  if (cached && (Date.now() - cached.ts) < PODCAST_DONE_CACHE_MS) {
+    setLibraryItemDoneState(itemId, cached.done);
+    return;
+  }
+  try {
+    // Add timeout to prevent slow podcasts from blocking queue
+    const done = await Promise.race([
+      isPodcastFullyPlayed(serverUrl, username, itemId),
+      new Promise<boolean>((_, reject) => 
+        setTimeout(() => reject(new Error("timeout")), PODCAST_BADGE_CHECK_TIMEOUT_MS)
+      )
+    ]);
+    podcastDoneCacheByItemId.set(itemId, { done, ts: Date.now() });
+    setLibraryItemDoneState(itemId, done);
+    podcastBadgeRetries.delete(itemId);
+  } catch (err) {
+    const retries = podcastBadgeRetries.get(itemId) ?? 0;
+    if ((err as Error)?.message === "timeout" && retries < PODCAST_BADGE_MAX_RETRIES) {
+      // Timeout: retry later without failing
+      podcastBadgeRetries.set(itemId, retries + 1);
+      queuePodcastLibraryDoneState(itemId);
+    } else {
+      // Hard failure or max retries reached: assume not done
+      podcastDoneCacheByItemId.set(itemId, { done: false, ts: Date.now() });
+      setLibraryItemDoneState(itemId, false);
+      podcastBadgeRetries.delete(itemId);
+    }
+  }
+}
+
+async function processPodcastBadgeQueue(runId: number) {
+  while (runId === podcastBadgeRunId && podcastBadgeQueue.length) {
+    const itemId = podcastBadgeQueue.shift();
+    if (itemId) await refreshPodcastLibraryDoneState(itemId);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  podcastBadgeWorker = false;
+}
+
+function queuePodcastLibraryDoneState(itemId: string) {
+  if (!itemId) return;
+  if (!podcastBadgeQueue.includes(itemId)) podcastBadgeQueue.push(itemId);
+  if (podcastBadgeWorker) return;
+  podcastBadgeWorker = true;
+  const runId = podcastBadgeRunId;
+  void processPodcastBadgeQueue(runId);
 }
 
 async function getItemCached(serverUrl: string, username: string, itemId: string, force = false): Promise<any> {
@@ -1466,7 +1548,11 @@ async function renderContinueListening(inProgress: any) {
         // Clear local progress cache so it reflects the reset state
         progressByItemId.set(pKey, { currentTime: 0 });
         removeContinueCard(itemId, episodeId);
-        setLibraryItemDoneState(itemId, true);
+        if (episodeId) {
+          queuePodcastLibraryDoneState(itemId);
+        } else {
+          setLibraryItemDoneState(itemId, true);
+        }
 
         // Refresh from server and rerender current library continue list
         lastInProgress = await invoke<any>("abs_get_items_in_progress", { serverUrl, username });
@@ -1483,6 +1569,9 @@ async function renderContinueListening(inProgress: any) {
 function showLibraryItems(name: string, items: any) {
   currentLibraryItems = items?.items ?? items?.results ?? items ?? [];
   currentLibraryItemIds = new Set(currentLibraryItems.map((x: any) => String(x?.id)).filter(Boolean));
+  podcastBadgeRunId += 1;
+  podcastBadgeQueue = [];
+  podcastBadgeRetries.clear();
   setMsg("homeMsg", "", "none");
   const total = el("libraryTotal");
   if (total) {
@@ -1637,11 +1726,15 @@ async function renderLibraryGrid() {
     (meta.children[0] as HTMLElement).textContent = title;
     (meta.children[1] as HTMLElement).textContent = isPodcastLibrary ? (it?.media?.metadata?.author ?? "") : author;
 
-    invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId: null })
-      .then((p) => {
-        if (isFinishedProgress(p)) doneBadge.style.display = "flex";
-      })
-      .catch(() => {});
+    if (isPodcastLibrary) {
+      queuePodcastLibraryDoneState(String(itemId));
+    } else {
+      invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId: null })
+        .then((p) => {
+          if (isFinishedProgress(p)) doneBadge.style.display = "flex";
+        })
+        .catch(() => {});
+    }
 
     coverWrap.append(img, doneBadge, menuBtn, menu);
     card.append(coverWrap, meta);
@@ -1713,7 +1806,9 @@ async function showItemDetail(itemId: string) {
   try { coverUrl = await invoke<string>("abs_get_cover_url", { serverUrl, username, itemId }); } catch {}
 
   const startAt = progressByItemId.get(itemId)?.currentTime ?? 0;
-  const playLabel = currentItemFinished
+  // If locally at 0 (mark as unplayed), show "Play" even if server says finished
+  const effectivelyFinished = currentItemFinished && startAt > 0;
+  const playLabel = effectivelyFinished
     ? `▶ ${tr("common.playAgain")}`
     : (startAt > 0 ? `▶ ${tr("common.resume")}` : `▶ ${tr("common.play")}`);
 
@@ -1725,6 +1820,8 @@ async function showItemDetail(itemId: string) {
   <div class="detail-actions">
   <button id="backBtn">← ${tr("common.back")}</button>
   <button id="resumeBtn">${playLabel}</button>
+  <button id="detailMarkPlayedBtn">✓ ${tr("menu.markPlayed")}</button>
+  <button id="detailMarkUnplayedBtn">↻ ${tr("menu.resetUnplayed")}</button>
   </div>
 
   <div id="detailHeader">
@@ -1925,7 +2022,7 @@ async function showItemDetail(itemId: string) {
         await invoke("abs_mark_played", { serverUrl, username, itemId, episodeId });
         done.style.display = "flex";
         rowMenu.style.display = "none";
-        setLibraryItemDoneState(String(itemId), true);
+        queuePodcastLibraryDoneState(String(itemId));
         scheduleContinueRefresh(0);
         removeContinueCard(itemId, episodeId);
       };
@@ -1935,7 +2032,7 @@ async function showItemDetail(itemId: string) {
         await invoke("abs_mark_unplayed", { serverUrl, username, itemId, episodeId });
         done.style.display = "none";
         rowMenu.style.display = "none";
-        setLibraryItemDoneState(String(itemId), false);
+        queuePodcastLibraryDoneState(String(itemId));
         scheduleContinueRefresh(0);
       };
     } else {
@@ -1957,7 +2054,42 @@ async function showItemDetail(itemId: string) {
 
   detail.querySelector(".card")?.appendChild(list);
   currentChapterRows = chapterRows
-  // ===== END TRACKLIST =====
+
+  // ===== DETAIL VIEW MARK PLAYED/UNPLAYED BUTTONS =====
+  const detailMarkPlayedBtn = el<HTMLButtonElement>("detailMarkPlayedBtn");
+  if (detailMarkPlayedBtn) {
+    detailMarkPlayedBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      try {
+        await invoke("abs_mark_played", { serverUrl, username, itemId, episodeId: null });
+        currentItemFinished = true;
+        progressByItemId.set(itemId, { currentTime: sumDurationsFromItem(item) });
+        await showItemDetail(itemId);
+        setLibraryItemDoneState(String(itemId), true);
+        void scheduleContinueRefresh(0);
+      } catch (e) {
+        console.log("detail mark played fail", e);
+      }
+    };
+  }
+
+  const detailMarkUnplayedBtn = el<HTMLButtonElement>("detailMarkUnplayedBtn");
+  if (detailMarkUnplayedBtn) {
+    detailMarkUnplayedBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      try {
+        await invoke("abs_mark_unplayed", { serverUrl, username, itemId, episodeId: null });
+        currentItemFinished = false;
+        progressByItemId.set(itemId, { currentTime: 0 });
+        await showItemDetail(itemId);
+        setLibraryItemDoneState(String(itemId), false);
+        void scheduleContinueRefresh(0);
+      } catch (e) {
+        console.log("detail mark unplayed fail", e);
+      }
+    };
+  }
+  // ===== END DETAIL VIEW MARK BUTTONS =====
   // ===== preload resume progress =====
 
   try {
