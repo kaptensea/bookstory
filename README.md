@@ -3,7 +3,7 @@
   <h1>Bookstory</h1>
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
-  ![Version](https://img.shields.io/badge/version-0.6.3-blue)
+  ![Version](https://img.shields.io/badge/version-0.6.4-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
   ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
   ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8D8)
@@ -38,11 +38,59 @@
 - A running [Audiobookshelf](https://www.audiobookshelf.org) server (self-hosted)
 - A valid Audiobookshelf account
 
+## Platform Compatibility
+
+Bookstory is designed to run on Linux and Windows.
+
+Linux compatibility (tested and supported):
+- X11 sessions (Intel, AMD, NVIDIA)
+- Wayland sessions (Intel, AMD)
+- Wayland + NVIDIA (automatic compatibility fallback during development launcher flow)
+
+What this means in practice:
+- Development runs are supported via `npm run tauri:dev`.
+- Standard Tauri packaging targets are supported for distribution: `.deb`, `.rpm`, and `.AppImage`.
+
+If you are on Wayland + NVIDIA and encounter startup issues in a custom environment, test with:
+- `WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 npm run tauri dev`
+
+This project includes launcher/build logic intended to keep compatibility consistent across environments.
+
 ## Releases
 
 Pre-built binaries for Linux and Windows are available on the [Releases](https://github.com/kaptensea/bookstory/releases) page.
 
 Bookstory is desktop-only (Linux and Windows).
+
+### Versioning and GitHub Builds
+
+Releases are version-tag driven.
+
+Typical flow:
+1. Update versions in project metadata.
+2. Commit and push to `main`.
+3. Create and push a tag like `v0.6.5`.
+4. GitHub Actions builds artifacts and publishes them to Releases.
+
+Use one tag push per release to avoid duplicate workflow runs.
+
+### Local Build and Dev Commands
+
+- Development: `npm run tauri:dev`
+- Packaged build: `npm run tauri:build`
+
+### Quick Install (End Users)
+
+Install from a release artifact:
+
+1. Debian/Ubuntu (`.deb`):
+  `sudo apt install ./bookstory_<version>_amd64.deb`
+2. Fedora/openSUSE/RHEL (`.rpm`):
+  `sudo rpm -i ./bookstory-<version>-1.x86_64.rpm`
+3. Universal Linux (`.AppImage`):
+  `chmod +x ./bookstory_<version>_amd64.AppImage && ./bookstory_<version>_amd64.AppImage`
+
+After install, launch Bookstory from your app menu or desktop launcher.
 
 ## Stack
 
