@@ -41,8 +41,6 @@ Pre-built binaries for Linux and Windows are available on the [Releases](https:/
 
 Bookstory is desktop-only (Linux and Windows).
 
-Pushing a tag like `v0.7.0` triggers the GitHub Actions workflow that builds and publishes release assets automatically.
-
 ## Stack
 
 | Layer | Technology |
