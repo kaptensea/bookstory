@@ -27,6 +27,9 @@
 
 - Podcast progress saving is currently disabled due to previous sync errors.
 - Audiobook progress saving and syncing still works as expected.
+
+## Metadata Fallbacks
+
 - In chapter lists, audiobooks can show generic labels like `Track 1`, `Track 2` when no embedded title is available.
 - Podcasts can show the episode filename when no episode title metadata is available.
 
