@@ -23,6 +23,11 @@
 - **Custom window controls** and native desktop feel
 - **Cover artwork** and metadata display throughout
 
+## Known Limitations
+
+- Podcast progress saving is currently disabled due to previous sync errors.
+- Audiobook progress saving and syncing still works as expected.
+
 ## Requirements
 
 - A running [Audiobookshelf](https://www.audiobookshelf.org) server (self-hosted)
