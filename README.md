@@ -35,26 +35,6 @@
 - A running [Audiobookshelf](https://www.audiobookshelf.org) server (self-hosted)
 - A valid Audiobookshelf account
 
-## Getting Started
-
-### Install dependencies
-
-```bash
-npm install
-```
-
-### Run in development
-
-```bash
-npm run tauri dev
-```
-
-### Build for production
-
-```bash
-npm run tauri build
-```
-
 ## Releases
 
 Pre-built binaries for Linux and Windows are available on the [Releases](https://github.com/kaptensea/bookstory/releases) page.
@@ -72,22 +52,6 @@ Pushing a tag like `v0.7.0` triggers the GitHub Actions workflow that builds and
 | Backend / proxy | Rust |
 | API | Audiobookshelf REST API |
 | Auth storage | System keyring |
-
-## Project Layout
-
-```
-src/
-  main.ts        # All UI logic and Tauri command calls
-  styles.css     # App styling
-
-src-tauri/
-  src/
-    lib.rs       # Tauri commands, audio proxy, keyring
-    main.rs
-  tauri.conf.json
-  capabilities/
-    default.json
-```
 
 ## License
 
