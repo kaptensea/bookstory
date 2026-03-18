@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.0 - 2026-03-18
+
+### Added
+- Missing-cover fallback artwork support using `covermissing.svg` across library cards, Continue Listening, detail view, mini player, and Now Playing.
+- Settings toggle to show/hide author names on audiobook cards.
+
+### Changed
+- Premium UI refresh with updated typography, accent, and glass styling.
+- Unified book-card cover presentation across library views and Continue Listening.
+- Cover rendering now preserves full cover art (`contain`) and fills side space with blurred background cover when needed.
+- Default playback volume now starts at 100%.
+- App version display moved to Settings view.
+
+### Fixed
+- Mark as unplayed now correctly syncs to Audiobookshelf using progress-record deletion flow.
+- Reset/mark as unplayed actions are hidden when progress is at 0%.
+- Improved hover responsiveness to avoid delayed highlight feedback and reduced jitter in library interaction.
+
 ## 0.6.6 - 2026-03-17
 
 ### Fixed

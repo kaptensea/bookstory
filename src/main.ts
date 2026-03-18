@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import coverMissingUrl from "./assets/covermissing.svg";
 
 type Json = any;
 
@@ -9,6 +10,7 @@ type AppSettings = {
   defaultSort: "recent" | "az" | "za";
   seekSeconds: number;
   continueAnimations: boolean;
+  showAuthor: boolean;
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -16,6 +18,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultSort: "recent",
   seekSeconds: 15,
   continueAnimations: true,
+  showAuthor: false,
 };
 
 const I18N: Record<"en" | "sv", Record<string, string>> = {
@@ -54,6 +57,7 @@ const I18N: Record<"en" | "sv", Record<string, string>> = {
     "settings.defaultSort": "Default sort",
     "settings.skipSeconds": "Skip seconds (back/forward)",
     "settings.animations": "Enable Continue card animations",
+    "settings.showAuthor": "Show author name on book cards",
     "settings.save": "Save settings",
     "settings.reset": "Reset defaults",
     "settings.saved": "Settings saved",
@@ -62,6 +66,7 @@ const I18N: Record<"en" | "sv", Record<string, string>> = {
     "error.invalidServer": "Server must be a valid http:// or https:// URL",
     "error.missingUsername": "Missing username",
     "error.missingPassword": "Missing password",
+    "cover.missing": "Missing cover",
     "label.book.singular": "book",
     "label.book.plural": "books",
   },
@@ -100,6 +105,7 @@ const I18N: Record<"en" | "sv", Record<string, string>> = {
     "settings.defaultSort": "Standardsortering",
     "settings.skipSeconds": "Hoppa sekunder (bak/fram)",
     "settings.animations": "Aktivera animationer i Forts\u00e4tt lyssna",
+    "settings.showAuthor": "Visa f\u00f6rfattare p\u00e5 bokskort",
     "settings.save": "Spara inst\u00e4llningar",
     "settings.reset": "\u00c5terst\u00e4ll standard",
     "settings.saved": "Inst\u00e4llningar sparade",
@@ -108,6 +114,7 @@ const I18N: Record<"en" | "sv", Record<string, string>> = {
     "error.invalidServer": "Servern m\u00e5ste vara en giltig http://- eller https://-URL",
     "error.missingUsername": "Saknar anv\u00e4ndarnamn",
     "error.missingPassword": "Saknar l\u00f6senord",
+    "cover.missing": "Saknar omslag",
     "label.book.singular": "bok",
     "label.book.plural": "b\u00f6cker",
   }
@@ -175,6 +182,7 @@ function loadSettings(): AppSettings {
       defaultSort: parsed?.defaultSort === "az" || parsed?.defaultSort === "za" ? parsed.defaultSort : "recent",
       seekSeconds: Math.max(5, Math.min(120, Number(parsed?.seekSeconds) || DEFAULT_SETTINGS.seekSeconds)),
       continueAnimations: parsed?.continueAnimations !== false,
+      showAuthor: parsed?.showAuthor === true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -274,11 +282,17 @@ function renderSettingsPage() {
         <span>${tr("settings.animations")}</span>
       </label>
 
+      <label class="settings-check-row">
+        <input id="settingsShowAuthor" type="checkbox" />
+        <span>${tr("settings.showAuthor")}</span>
+      </label>
+
       <div class="settings-actions">
         <button id="settingsSaveBtn" type="button">${tr("settings.save")}</button>
         <button id="settingsResetBtn" type="button">${tr("settings.reset")}</button>
       </div>
       <div id="settingsMsg" class="msg"></div>
+      <div id="settingsVersion" class="settings-version"></div>
     </div>
   `;
 
@@ -286,11 +300,15 @@ function renderSettingsPage() {
   const sort = el<HTMLSelectElement>("settingsDefaultSort");
   const seek = el<HTMLInputElement>("settingsSeekSeconds");
   const anim = el<HTMLInputElement>("settingsContinueAnimations");
+  const showAuthorEl = el<HTMLInputElement>("settingsShowAuthor");
 
   language.value = appSettings.language;
   sort.value = appSettings.defaultSort;
   seek.value = String(appSettings.seekSeconds);
   anim.checked = appSettings.continueAnimations;
+  showAuthorEl.checked = appSettings.showAuthor;
+
+  showAppVersion();
 }
 
 
@@ -530,11 +548,20 @@ function showMiniPlayer(title:string, author:string, cover:string){
   if (npTitle) npTitle.textContent = title
   if (npAuthor) npAuthor.textContent = author
 
+  const resolvedCover = cover?.trim() ? cover : coverMissingUrl
+
   const img = el<HTMLImageElement>("miniCover")
-  img.src = cover
+  img.onerror = () => { img.onerror = null; img.src = coverMissingUrl; }
+  img.src = resolvedCover
 
   const npImg = document.getElementById("npCover") as HTMLImageElement | null
-  if (npImg) npImg.src = cover
+  if (npImg) {
+    npImg.onerror = () => { npImg.onerror = null; npImg.src = coverMissingUrl; }
+    npImg.src = resolvedCover
+  }
+
+  const npBg = document.getElementById("npBg") as HTMLDivElement | null
+  if (npBg) npBg.style.backgroundImage = `url('${resolvedCover.replace(/'/g, "\\'")}'` + ")"
 }
 
 function setMsg(id: string, text: string, type: "ok" | "error" | "none" = "none") {
@@ -547,6 +574,34 @@ function escapeHtml(s: string) {
   return (s ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
   }[c]!));
+}
+
+function applyCardCoverWithFallback(
+  img: HTMLImageElement,
+  bgImg: HTMLImageElement,
+  coverUrl: string,
+) {
+  const setMissing = () => {
+    img.onerror = null;
+    img.onload = null;
+    img.src = coverMissingUrl;
+    bgImg.src = coverMissingUrl;
+  };
+
+  if (!coverUrl?.trim()) {
+    setMissing();
+    return;
+  }
+
+  img.onerror = () => setMissing();
+  img.onload = () => {
+    if (!img.naturalWidth || !img.naturalHeight) {
+      setMissing();
+    }
+  };
+
+  img.src = coverUrl;
+  bgImg.src = coverUrl;
 }
 
 /* ---------------- Storage ---------------- */
@@ -600,12 +655,14 @@ document.addEventListener("click", async (e) => {
       const defaultSort = (document.getElementById("settingsDefaultSort") as HTMLSelectElement | null)?.value as AppSettings["defaultSort"] | undefined;
       const seekRaw = Number((document.getElementById("settingsSeekSeconds") as HTMLInputElement | null)?.value ?? appSettings.seekSeconds);
       const continueAnimations = Boolean((document.getElementById("settingsContinueAnimations") as HTMLInputElement | null)?.checked);
+      const showAuthor = Boolean((document.getElementById("settingsShowAuthor") as HTMLInputElement | null)?.checked);
 
       const next: AppSettings = {
         language: language === "sv" ? "sv" : "en",
         defaultSort: defaultSort === "az" || defaultSort === "za" ? defaultSort : "recent",
         seekSeconds: Math.max(5, Math.min(120, isFinite(seekRaw) ? seekRaw : appSettings.seekSeconds)),
         continueAnimations,
+        showAuthor,
       };
 
       saveSettings(next);
@@ -1356,7 +1413,8 @@ async function renderContinueListening(inProgress: any) {
 
     card.innerHTML = `
     <div class="cover-wrap">
-    <img class="book-cover" loading="lazy">
+    <img class="book-cover-bg" loading="lazy" decoding="async" alt="" aria-hidden="true">
+    <img class="book-cover" loading="lazy" decoding="async">
     <div class="progress-wrap">
     <div class="progress-bar"></div>
     </div>
@@ -1371,6 +1429,7 @@ async function renderContinueListening(inProgress: any) {
     `;
 
     const img = card.querySelector(".book-cover") as HTMLImageElement;
+    const bgImg = card.querySelector(".book-cover-bg") as HTMLImageElement;
     const bar = card.querySelector(".progress-bar") as HTMLDivElement;
     // Start neutral and let per-item init set the correct value.
     bar.style.width = "3%";
@@ -1388,9 +1447,10 @@ async function renderContinueListening(inProgress: any) {
     let title = libTitle || p?.title || itemId;
     let author = libAuthor || p?.author || "";
 
+    let isPodcastItem = false;
     try {
       const item = await itemPromise;
-      const isPodcastItem = Array.isArray(item?.media?.episodes);
+      isPodcastItem = Array.isArray(item?.media?.episodes);
       const resolution = isPodcastItem
         ? resolvePodcastEpisode(item, p, episodeId, getCurrentTimeForProgress(item, p))
         : null;
@@ -1409,11 +1469,14 @@ async function renderContinueListening(inProgress: any) {
     } catch {}
 
     titleEl.textContent = title;
-    authorEl.textContent = author;
+    authorEl.textContent = (!isPodcastItem && !appSettings.showAuthor) ? "" : author;
 
     try {
-      img.src = await invoke<string>("abs_get_cover_url", { serverUrl, username, itemId });
-    } catch {}
+      const url = await invoke<string>("abs_get_cover_url", { serverUrl, username, itemId });
+      applyCardCoverWithFallback(img, bgImg, url);
+    } catch {
+      applyCardCoverWithFallback(img, bgImg, "");
+    }
 
     // progress init
     (async () => {
@@ -1612,13 +1675,20 @@ async function renderLibraryGrid() {
     card.className = "book-card";
 
     const coverWrap = document.createElement("div");
-    coverWrap.style.position = "relative";
+    coverWrap.className = "cover-wrap";
+
+    const bgImg = document.createElement("img");
+    bgImg.className = "book-cover-bg";
+    bgImg.loading = "lazy";
+    bgImg.decoding = "async";
+    bgImg.alt = "";
+    bgImg.setAttribute("aria-hidden", "true");
 
     const img = document.createElement("img");
-    img.className = "book-cover"; img.loading = "lazy"; img.alt = title;
+    img.className = "book-cover"; img.loading = "lazy"; img.decoding = "async"; img.alt = title;
     invoke<string>("abs_get_cover_url", { serverUrl, username, itemId })
-      .then((url) => { img.src = url; })
-      .catch(() => {});
+      .then((url) => { applyCardCoverWithFallback(img, bgImg, url); })
+      .catch(() => { applyCardCoverWithFallback(img, bgImg, ""); });
 
     const doneBadge = document.createElement("div");
     doneBadge.textContent = "✓";
@@ -1631,7 +1701,7 @@ async function renderLibraryGrid() {
     doneBadge.style.display = "none";
     doneBadge.style.alignItems = "center";
     doneBadge.style.justifyContent = "center";
-    doneBadge.style.background = "#2e7d32";
+    doneBadge.style.background = "#10b981";
     doneBadge.style.color = "#fff";
     doneBadge.style.fontWeight = "800";
     doneBadge.style.fontSize = "14px";
@@ -1690,6 +1760,7 @@ async function renderLibraryGrid() {
     resetBtn.style.borderRadius = "8px";
     resetBtn.style.background = "rgba(255,255,255,.08)";
     resetBtn.style.color = "inherit";
+    resetBtn.style.display = "none";
 
     menu.append(markPlayedBtn, resetBtn);
 
@@ -1724,7 +1795,9 @@ async function renderLibraryGrid() {
     `;
 
     (meta.children[0] as HTMLElement).textContent = title;
-    (meta.children[1] as HTMLElement).textContent = isPodcastLibrary ? (it?.media?.metadata?.author ?? "") : author;
+    (meta.children[1] as HTMLElement).textContent = isPodcastLibrary
+      ? (it?.media?.metadata?.author ?? "")
+      : (appSettings.showAuthor ? author : "");
 
     if (isPodcastLibrary) {
       queuePodcastLibraryDoneState(String(itemId));
@@ -1732,11 +1805,15 @@ async function renderLibraryGrid() {
       invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId: null })
         .then((p) => {
           if (isFinishedProgress(p)) doneBadge.style.display = "flex";
+          if (p && (isFinishedProgress(p) || (p.currentTime ?? 0) > 0 || (p.progress ?? 0) > 0)) {
+            resetBtn.style.display = "";
+          }
         })
         .catch(() => {});
     }
 
     coverWrap.append(img, doneBadge, menuBtn, menu);
+      coverWrap.prepend(bgImg);
     card.append(coverWrap, meta);
     card.onclick = () => showItemDetail(String(itemId));
     container.appendChild(card);
@@ -1821,7 +1898,7 @@ async function showItemDetail(itemId: string) {
   <button id="backBtn">← ${tr("common.back")}</button>
   <button id="resumeBtn">${playLabel}</button>
   <button id="detailMarkPlayedBtn">✓ ${tr("menu.markPlayed")}</button>
-  <button id="detailMarkUnplayedBtn">↻ ${tr("menu.resetUnplayed")}</button>
+  ${(currentItemFinished || startAt > 0) ? `<button id="detailMarkUnplayedBtn">↻ ${tr("menu.resetUnplayed")}</button>` : `<button id="detailMarkUnplayedBtn" style="display:none">↻ ${tr("menu.resetUnplayed")}</button>`}
   </div>
 
   <div id="detailHeader">
@@ -1848,19 +1925,18 @@ async function showItemDetail(itemId: string) {
   </div>
   `;
 
-  if (coverUrl) {
-    const header = el("detailHeader");
-    if (header) {
-      const img = document.createElement("img");
-      img.src = coverUrl;
-      img.alt = title;
-      img.loading = "lazy";
-      img.style.width = "140px";
-      img.style.borderRadius = "12px";
-      img.style.background = "rgba(127,127,127,.15)";
-      img.onerror = () => img.remove();
-      header.insertBefore(img, header.firstChild);
-    }
+  const detailCover = document.getElementById("detailCover") as HTMLImageElement | null;
+  if (detailCover) {
+    detailCover.src = coverUrl?.trim() ? coverUrl : coverMissingUrl;
+    detailCover.alt = title;
+    detailCover.loading = "lazy";
+    detailCover.style.width = "140px";
+    detailCover.style.borderRadius = "12px";
+    detailCover.style.background = "rgba(127,127,127,.15)";
+    detailCover.onerror = () => {
+      detailCover.onerror = null;
+      detailCover.src = coverMissingUrl;
+    };
   }
   // ===== TRACKLIST =====
   let files =
@@ -1951,7 +2027,7 @@ async function showItemDetail(itemId: string) {
     done.style.borderRadius = "999px";
     done.style.alignItems = "center";
     done.style.justifyContent = "center";
-    done.style.background = "#2e7d32";
+    done.style.background = "#10b981";
     done.style.color = "#fff";
     done.style.fontWeight = "800";
     done.style.fontSize = "13px";
@@ -2001,6 +2077,7 @@ async function showItemDetail(itemId: string) {
     rowReset.style.border = "1px solid rgba(255,255,255,.18)";
     rowReset.style.background = "rgba(255,255,255,.08)";
     rowReset.style.color = "inherit";
+    rowReset.style.display = "none";
 
     rowMenu.append(rowMarkPlayed, rowReset);
 
@@ -2015,6 +2092,9 @@ async function showItemDetail(itemId: string) {
       const episodeId = String(f.id);
       invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId }).then((epProgress) => {
         if (isFinishedProgress(epProgress)) done.style.display = "flex";
+        if (epProgress && (isFinishedProgress(epProgress) || (epProgress.currentTime ?? 0) > 0 || (epProgress.progress ?? 0) > 0)) {
+          rowReset.style.display = "";
+        }
       }).catch(() => {});
 
       rowMarkPlayed.onclick = async (ev) => {
@@ -2281,7 +2361,10 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
         author = item?.media?.metadata?.authorName || ""
       }
       
-      const cover = await invoke<string>("abs_get_cover_url",{serverUrl,username,itemId})
+      let cover = ""
+      try {
+        cover = await invoke<string>("abs_get_cover_url",{serverUrl,username,itemId})
+      } catch {}
 
       showMiniPlayer(title,author,cover)
       startMiniTicker()
@@ -2577,15 +2660,9 @@ async function stopPlaybackSession() {
 
 /* ---------------- Boot ---------------- */
 async function showAppVersion() {
-
   const v = await getVersion()
-
-  const elv = document.getElementById("appVersion")
-
-  if (elv) {
-    elv.textContent = "v" + v
-  }
-
+  const settingsEl = document.getElementById("settingsVersion")
+  if (settingsEl) settingsEl.textContent = "Bookstory v" + v
 }
 
 async function boot() {
@@ -2593,7 +2670,7 @@ async function boot() {
   applySettings();
 
   const audio = el<HTMLAudioElement>("player")
-  audio.volume = 0.8
+  audio.volume = 1.0
   audio.addEventListener("timeupdate", () => {
     maybeEndPlaybackLoading(audio);
   })
@@ -2618,7 +2695,7 @@ async function boot() {
     setPlaybackLoading(false);
   })
 
-  el<HTMLInputElement>("miniVolume").value = "0.8"
+  el<HTMLInputElement>("miniVolume").value = "1.0"
 
   el<HTMLInputElement>("miniVolume").oninput = (e) => {
 
