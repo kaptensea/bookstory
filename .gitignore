@@ -22,6 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.SRCINFO
+PKGBULD
 
 # Tauri / Rust
 src-tauri/target
