@@ -540,7 +540,11 @@ function renderUpdateSection(checking = false) {
   const checkBtn = document.getElementById("settingsCheckUpdatesBtn") as HTMLButtonElement | null;
   const openBtn = document.getElementById("settingsOpenReleaseBtn") as HTMLButtonElement | null;
 
-  if (!statusEl || !hintEl || !checkBtn || !openBtn) return;
+  if (!statusEl || !hintEl || !checkBtn || !openBtn) {
+    // Settings panel is lazily rendered, but the top banner still needs updates.
+    renderUpdateBanner();
+    return;
+  }
 
   checkBtn.disabled = checking;
   checkBtn.textContent = checking ? tr("settings.checkingUpdates") : tr("settings.checkUpdates");
