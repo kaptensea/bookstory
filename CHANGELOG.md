@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## 1.1.2 - 2026-03-18
+## 1.1.3 - 2026-03-18
 
 ### Added
 - Local audio proxy now fully supports range requests and Bearer authentication forwarding, enabling reliable seeking and playback of all file formats.
