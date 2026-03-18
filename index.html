@@ -2,6 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bookstory</title>
@@ -9,14 +12,6 @@
   </head>
 
   <body>
-    <div id="windowTitlebar" data-tauri-drag-region>
-      <div id="windowTitle">Bookstory</div>
-      <div id="windowControls">
-        <button id="winMinBtn" type="button" title="Minimize">_</button>
-        <button id="winMaxBtn" type="button" title="Maximize">▢</button>
-        <button id="winCloseBtn" type="button" title="Close">✕</button>
-      </div>
-    </div>
 
     <div class="container">
 
@@ -47,12 +42,18 @@
     <div id="homeView" style="display:none;">
 
       <!-- TOP BAR (full width) -->
-      <div class="topbar">
+      <div class="topbar" data-tauri-drag-region>
         <h1 id="topbarTitle">Bookstory</h1>
         <div id="topbarBrand" aria-hidden="true">
           <img src="/src/assets/bookstory-logo.svg" alt="" />
         </div>
-        <div id="appVersion"></div>
+        <div class="topbar-right">
+          <div id="windowControls">
+            <button id="winMinBtn" type="button" title="Minimize">_</button>
+            <button id="winMaxBtn" type="button" title="Maximize">▢</button>
+            <button id="winCloseBtn" type="button" title="Close">✕</button>
+          </div>
+        </div>
       </div>
 
       <!-- CONTENT ROW -->
@@ -140,6 +141,8 @@
 
 
 <div id="nowPlayingView" class="now-playing" style="display:none">
+
+  <div id="npBg"></div>
 
   <button id="closeNowPlaying">↓</button>
 

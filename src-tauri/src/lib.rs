@@ -706,30 +706,62 @@ async fn abs_mark_unplayed(
     let server_url = normalize_server_url(server_url);
     let token = get_token_from_keyring(&server_url, &username)?;
 
-    let url = if let Some(ref ep_id) = episode_id {
+    // Step 1: Fetch the current progress record to obtain its UUID.
+    // The DELETE endpoint requires the progress record's own UUID, not the
+    // library item ID.
+    let get_url = if let Some(ref ep_id) = episode_id {
         format!("{}/api/me/progress/{}/{}", server_url, item_id, ep_id)
     } else {
         format!("{}/api/me/progress/{}", server_url, item_id)
     };
 
-    let body = serde_json::json!({
-        "isFinished": false,
-        "progress": 0.0,
-        "currentTime": 0.0
-    });
+    let client = reqwest::Client::new();
 
-    let resp = reqwest::Client::new()
-    .patch(url)
-    .header("Authorization", format!("Bearer {}", token))
-    .json(&body)
-    .send()
-    .await
-    .map_err(|e| format!("Network error: {}", e))?;
+    let get_resp = client
+        .get(&get_url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
 
-    if !resp.status().is_success() {
+    // 404 means no progress exists — already unplayed, nothing to do.
+    if get_resp.status().as_u16() == 404 {
+        return Ok(());
+    }
+
+    if !get_resp.status().is_success() {
+        return Err(format!(
+            "Fetch progress failed (HTTP {})",
+            get_resp.status()
+        ));
+    }
+
+    let progress: serde_json::Value = get_resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid server response: {}", e))?;
+
+    // Step 2: Extract the progress record's UUID.
+    let progress_id = progress["id"]
+        .as_str()
+        .ok_or_else(|| "Progress record missing id field".to_string())?;
+
+    // Step 3: Delete the progress record entirely.
+    // This is the correct ABS API for resetting a book to unplayed —
+    // PATCH with isFinished:false is ignored by the server.
+    let delete_url = format!("{}/api/me/progress/{}", server_url, progress_id);
+
+    let delete_resp = client
+        .delete(&delete_url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !delete_resp.status().is_success() {
         return Err(format!(
             "Mark unplayed failed (HTTP {})",
-            resp.status()
+            delete_resp.status()
         ));
     }
 
