@@ -109,11 +109,13 @@ Use one tag push per release to avoid duplicate workflow runs.
 
 Install from a release artifact:
 
-1. Debian/Ubuntu (`.deb`):
+1. Arch Linux (AUR):
+  `yay -S bookstory-bin`
+2. Debian/Ubuntu (`.deb`):
   `sudo apt install ./bookstory_<version>_amd64.deb`
-2. Fedora/openSUSE/RHEL (`.rpm`):
+3. Fedora/openSUSE/RHEL (`.rpm`):
   `sudo rpm -i ./bookstory-<version>-1.x86_64.rpm`
-3. Universal Linux (`.AppImage`):
+4. Universal Linux (`.AppImage`):
   `chmod +x ./bookstory_<version>_amd64.AppImage && ./bookstory_<version>_amd64.AppImage`
 
 After install, launch Bookstory from your app menu or desktop launcher.

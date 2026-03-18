@@ -10,6 +10,10 @@ All notable changes to this project are documented in this file.
 - Settings button now works as a true toggle (pressing it again closes Settings).
 - Library card three-dot action menu now stays visible/clickable above cover layers.
 - Added a subtle hover affordance on the three-dot action button for clearer interaction feedback.
+- Update banner rendering now works at app startup even before Settings has been opened.
+
+### Changed
+- README Quick Install now includes Arch Linux AUR installation (`yay -S bookstory-bin`).
 
 ## 1.1.0 - 2026-03-18
 
