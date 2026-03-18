@@ -27,6 +27,22 @@
 - **Custom window controls** and native desktop feel
 - **Cover artwork** and metadata display throughout
 
+## Bug Reports & Feedback
+
+Found a bug? Missing a feature? Want something removed or changed?
+
+**Open an issue on GitHub:** [github.com/kaptensea/bookstory/issues](https://github.com/kaptensea/bookstory/issues)
+
+When reporting a bug, please include:
+- What you expected to happen
+- What actually happened
+- Your OS and whether you use X11 or Wayland
+- Steps to reproduce if possible
+
+Feature requests and general feedback are welcome too — just open an issue and describe what you'd like.
+
+---
+
 ## Known Limitations
 
 - AppImage bundling can fail on some newer Linux toolchains due to `strip`/`RELR` compatibility in linuxdeploy.
