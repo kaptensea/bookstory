@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import coverMissingUrl from "./assets/covermissing.svg";
 
 type Json = any;
 
@@ -40,6 +39,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   continueAnimations: true,
   showAuthor: false,
 };
+
+const coverMissingUrl = new URL("./assets/covermissing.svg", import.meta.url).href;
 
 const I18N: Record<AppLanguage, Record<string, string>> = {
   en: {
@@ -282,6 +283,9 @@ let podcastBadgeRunId = 0;
 let playbackLoadingActive = false;
 let playbackLoadingStartTime = 0;
 let playbackLoadingStartPos = 0;
+let isNowPlayingSeekDragging = false;
+let isMiniSeekDragging = false;
+let playbackRequestId = 0;
 let currentAppVersion = "";
 let lastUpdateState: UpdateState | null = null;
 let updateCheckPromise: Promise<UpdateState> | null = null;
@@ -653,7 +657,7 @@ function startMiniTicker(){
       if (!currentItemId) return
         if (audio.paused) return
 
-          const miniBar = el("miniProgressBar")
+          const miniSeek = document.getElementById("miniSeek") as HTMLInputElement | null
           const curLbl = el("miniCurrent")
           const totLbl = el("miniTotal")
 
@@ -678,7 +682,9 @@ function startMiniTicker(){
           const pct =
           total > 0 ? absolute / total * 100 : 0
 
-          miniBar.style.width = pct + "%"
+          if (miniSeek && !isMiniSeekDragging) {
+            miniSeek.value = String(Math.max(0, Math.min(100, pct)))
+          }
 
           curLbl.textContent = fmtTime(absolute)
           totLbl.textContent = fmtTime(total)
@@ -723,9 +729,51 @@ function syncNowPlayingProgress(audio: HTMLAudioElement) {
   const { total, absolute } = getPlaybackTotals(audio);
   const pct = total > 0 ? (absolute / total) * 100 : 0;
 
-  seek.value = String(Math.max(0, Math.min(100, pct)));
+  if (!isNowPlayingSeekDragging) {
+    seek.value = String(Math.max(0, Math.min(100, pct)));
+  }
   if (cur) cur.textContent = fmtTime(absolute);
   if (tot) tot.textContent = fmtTime(total);
+}
+
+function seekPlaybackToPercent(audio: HTMLAudioElement, pctRaw: number) {
+  if (!hasStartedPlayback) return;
+  if (!currentItemId) return;
+  if (!audio.src) return;
+
+  const pct = Math.max(0, Math.min(1, pctRaw));
+  const { total } = getPlaybackTotals(audio);
+  if (total <= 0) return;
+
+  const targetAbsolute = total * pct;
+  const isPodcast = currentFiles[0]?.audioFile !== undefined;
+
+  console.log("[play-debug] seek request", {
+    currentItemId,
+    currentChapterIndex,
+    pct,
+    total,
+    targetAbsolute,
+    isPodcast,
+  });
+
+  if (isPodcast) {
+    audio.currentTime = Math.max(0, targetAbsolute);
+    return;
+  }
+
+  const pos = getChapterIndexFromTime(targetAbsolute);
+  if (pos.index !== currentChapterIndex) {
+    forcedSeekTime = pos.offset;
+    console.log("[play-debug] seek switching chapter", {
+      fromIndex: currentChapterIndex,
+      toIndex: pos.index,
+      forcedSeekTime,
+    });
+    void playChapter(currentItemId, pos.index);
+  } else {
+    audio.currentTime = Math.max(0, pos.offset);
+  }
 }
 /* ---------------- Duration helpers ---------------- */
 function formatTotalDuration(sec: number) {
@@ -1169,7 +1217,7 @@ document.addEventListener("click", async (e) => {
       const next = currentChapterIndex + 1
 
       if (next < currentFiles.length) {
-        playChapter(currentItemId, next)
+        void playChapter(currentItemId, next)
       }
     }
 
@@ -1186,7 +1234,7 @@ document.addEventListener("click", async (e) => {
       const prev = currentChapterIndex - 1
 
       if (prev >= 0) {
-        playChapter(currentItemId, prev)
+        void playChapter(currentItemId, prev)
       }
     }
 
@@ -2226,39 +2274,6 @@ async function renderLibraryGrid() {
   }
 }
 
-const progressWrap = document.getElementById("miniProgressWrap")
-
-if (progressWrap) {
-
-  progressWrap.addEventListener("click", (e) => {
-
-    const audio = document.getElementById("player") as HTMLAudioElement
-    if (!audio || !currentItemId) return
-
-      const rect = progressWrap.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const pct = x / rect.width
-
-      // Check if podcast or audiobook
-      const isPodcast = currentFiles[0]?.audioFile !== undefined;
-      
-      if (isPodcast) {
-        // For podcasts: seek within current episode only
-        const currentFile = currentFiles[currentChapterIndex];
-        const episodeDuration = currentFile?.audioFile?.duration || 0;
-        const seekTime = episodeDuration * pct;
-        audio.currentTime = seekTime;
-      } else {
-        // For audiobooks: navigate across chapters
-        const total = sumDurationsFromItem({ media: { audioFiles: currentFiles } });
-        const target = total * pct;
-        const pos = getChapterIndexFromTime(target);
-        forcedSeekTime = pos.offset;
-        playChapter(currentItemId, pos.index);
-      }
-  })
-}
-
 /* ---------------- Detail / audio ---------------- */
 async function showItemDetail(itemId: string) {
   setContinueVisible(false);
@@ -2670,18 +2685,6 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
     }
     
     await invoke("abs_set_active_user", { serverUrl, username });
-    
-    if (!isPodcast) {
-      try {
-        await invoke("abs_trigger_play", {
-          serverUrl,
-          username,
-          itemId
-        })
-      } catch (e) {
-        console.log("play trigger fail", e)
-      }
-    }
 
     currentChapterIndex = index;
     currentItemId = itemId;
@@ -2699,13 +2702,36 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
     // Episodes use audioFile.ino, audiofiles use ino
     const fileIno = currentFiles[index].audioFile?.ino || currentFiles[index].ino;
 
+    console.log("[play-debug] playChapter start", {
+      itemId,
+      index,
+      openNowPlaying,
+      fileIno,
+      currentEpisodeId,
+      mediaType: currentLibraryMediaType,
+      isPodcast: currentFiles[0]?.audioFile !== undefined,
+      fileTitle: f?.title ?? null,
+      fileDuration: f?.duration ?? f?.audioFile?.duration ?? null,
+    });
+
     const url = await invoke<string>("abs_local_player_url", {
       libraryId: itemId,
       index: fileIno
     });
 
+    console.log("[play-debug] local playback url", {
+      itemId,
+      index,
+      fileIno,
+      url,
+    });
+
+    const requestId = ++playbackRequestId;
+
     // Completely reset audio element to clear any bad state
     audio.pause();
+    audio.onerror = null;
+    audio.onloadedmetadata = null;
     audio.currentTime = 0;
     audio.src = "";
     
@@ -2713,20 +2739,139 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
     await new Promise(resolve => setTimeout(resolve, 100));
     
     audio.src = url;
+    console.log("[play-debug] audio src assigned", {
+      requestedUrl: url,
+      audioSrc: audio.src,
+      currentSrc: audio.currentSrc,
+    });
     beginPlaybackLoading(audio)
     audio.preload = "auto"
     
-    // Add error handler with recovery
+    // Add error handler with one-shot fallback to resolved playback URL.
+    let audioFallbackTried = false;
     audio.onerror = () => {
-      console.log("AUDIO ERROR:", audio.error?.message, "Code:", audio.error?.code);
+      if (requestId !== playbackRequestId) {
+        console.log("[play-debug] ignoring stale audio error", { requestId, playbackRequestId });
+        return;
+      }
+      console.log("[play-debug] audio error", {
+        message: audio.error?.message ?? null,
+        code: audio.error?.code ?? null,
+        networkState: audio.networkState,
+        readyState: audio.readyState,
+        currentSrc: audio.currentSrc || audio.src,
+        currentTime: audio.currentTime,
+        duration: audio.duration,
+      });
       playbackLoadingActive = false;
       setPlaybackLoading(false);
-      isLoadingChapter = false; // Allow user to retry
+
+      if (audioFallbackTried) {
+        isLoadingChapter = false;
+        return;
+      }
+
+      audioFallbackTried = true;
+      void (async () => {
+        try {
+          const fallbackUrl = await invoke<string>("abs_resolve_playback_url", {
+            serverUrl,
+            username,
+            itemId,
+            episodeId: isPodcast ? currentEpisodeId : null
+          });
+
+          console.log("[play-debug] retrying with fallback playback url", {
+            itemId,
+            index,
+            fileIno,
+            fallbackUrl,
+          });
+
+          audio.pause();
+          audio.onerror = null;
+          audio.onloadedmetadata = null;
+          audio.currentTime = 0;
+
+          // WebKitGTK (Tauri/Linux) plays HLS .m3u8 natively via GStreamer,
+          // so treat all fallback URLs (including HLS) the same way.
+          audio.src = fallbackUrl;
+          beginPlaybackLoading(audio);
+          audio.preload = "auto";
+
+          audio.onerror = () => {
+            if (requestId !== playbackRequestId) return;
+            console.log("[play-debug] fallback audio error", {
+              message: audio.error?.message ?? null,
+              code: audio.error?.code ?? null,
+              networkState: audio.networkState,
+              readyState: audio.readyState,
+              currentSrc: audio.currentSrc || audio.src,
+            });
+            playbackLoadingActive = false;
+            setPlaybackLoading(false);
+            isLoadingChapter = false;
+          };
+
+          audio.onloadedmetadata = async () => {
+            if (requestId !== playbackRequestId) return;
+            console.log("[play-debug] fallback loadedmetadata", {
+              currentSrc: audio.currentSrc || audio.src,
+              duration: audio.duration,
+              readyState: audio.readyState,
+            });
+
+            if (forcedSeekTime !== null) {
+              audio.currentTime = forcedSeekTime;
+              forcedSeekTime = null;
+            }
+
+            resetPlaybackLoadingAnchor(audio);
+
+            try {
+              await audio.play();
+              console.log("[play-debug] fallback audio.play resolved", {
+                currentSrc: audio.currentSrc || audio.src,
+                currentTime: audio.currentTime,
+              });
+            } catch (e) {
+              console.log("[play-debug] fallback audio.play failed", {
+                error: String(e),
+                currentSrc: audio.currentSrc || audio.src,
+                readyState: audio.readyState,
+                networkState: audio.networkState,
+              });
+            }
+          };
+
+          audio.load();
+        } catch (e) {
+          console.log("[play-debug] fallback playback url resolution failed", {
+            error: String(e),
+            itemId,
+            index,
+          });
+          isLoadingChapter = false;
+        }
+      })();
     };
     
     audio.load()
+    console.log("[play-debug] audio.load called", {
+      currentSrc: audio.currentSrc || audio.src,
+      preload: audio.preload,
+    });
 
     audio.onloadedmetadata = async () => {
+      if (requestId !== playbackRequestId) {
+        console.log("[play-debug] ignoring stale loadedmetadata", { requestId, playbackRequestId });
+        return;
+      }
+      console.log("[play-debug] loadedmetadata", {
+        currentSrc: audio.currentSrc || audio.src,
+        duration: audio.duration,
+        readyState: audio.readyState,
+      });
 
       if (forcedSeekTime !== null) {
         audio.currentTime = forcedSeekTime
@@ -2739,8 +2884,17 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
 
       try {
         await audio.play()
+        console.log("[play-debug] audio.play resolved", {
+          currentSrc: audio.currentSrc || audio.src,
+          currentTime: audio.currentTime,
+        });
       } catch (e) {
-        console.log("AUDIO PLAY FAIL", e)
+        console.log("[play-debug] audio.play failed", {
+          error: String(e),
+          currentSrc: audio.currentSrc || audio.src,
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+        })
       }
 
     }
@@ -2863,6 +3017,12 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
       playRes?.session?.id ||
       null
 
+      console.log("[play-debug] start playback response", {
+        sessionId: currentSessionId,
+        keys: playRes && typeof playRes === "object" ? Object.keys(playRes) : [],
+        audioTracks: playRes?.audioTracks?.length ?? playRes?.media?.audioTracks?.length ?? null,
+      });
+
       if (currentSessionId) {
         setTimeout(async () => {
           try {
@@ -2910,7 +3070,7 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
       if (!currentItemId) return
 
       // ⭐ MINI PLAYER TOTAL PROGRESS (lägg ALLTID först)
-      const miniBar = el("miniProgressBar")
+      const miniSeek = document.getElementById("miniSeek") as HTMLInputElement | null
       const curLbl = el("miniCurrent")
       const totLbl = el("miniTotal")
 
@@ -2918,7 +3078,9 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
         const { total, absolute } = getPlaybackTotals(audio)
         const pct = total > 0 ? (absolute / total) * 100 : 0
 
-        miniBar.style.width = pct + "%"
+        if (miniSeek && !isMiniSeekDragging) {
+          miniSeek.value = String(Math.max(0, Math.min(100, pct)))
+        }
         curLbl.textContent = fmtTime(absolute)
         totLbl.textContent = fmtTime(total)
 
@@ -3123,26 +3285,58 @@ async function boot() {
 
   const npSeek = document.getElementById("npSeek") as HTMLInputElement | null
   if (npSeek) {
+    npSeek.addEventListener("pointerdown", () => {
+      isNowPlayingSeekDragging = true
+    })
+    npSeek.addEventListener("pointerup", () => {
+      isNowPlayingSeekDragging = false
+    })
     npSeek.oninput = (e) => {
       const audio = el<HTMLAudioElement>("player")
       const pct = Number((e.target as HTMLInputElement).value) / 100
       const { total } = getPlaybackTotals(audio)
       if (total > 0) {
         const targetAbsolute = total * pct
-        const isPodcast = currentFiles[0]?.audioFile !== undefined
-
-        if (isPodcast) {
-          audio.currentTime = Math.max(0, targetAbsolute)
-        } else {
-          const pos = getChapterIndexFromTime(targetAbsolute)
-          if (pos.index !== currentChapterIndex && currentItemId) {
-            forcedSeekTime = pos.offset
-            void playChapter(currentItemId, pos.index)
-          } else {
-            audio.currentTime = Math.max(0, pos.offset)
-          }
-        }
+        const cur = document.getElementById("npCurrent")
+        if (cur) cur.textContent = fmtTime(targetAbsolute)
       }
+      syncNowPlayingProgress(audio)
+    }
+    npSeek.onchange = (e) => {
+      const audio = el<HTMLAudioElement>("player")
+      const pct = Number((e.target as HTMLInputElement).value) / 100
+      seekPlaybackToPercent(audio, pct)
+      syncNowPlayingProgress(audio)
+    }
+  }
+
+  const miniSeek = document.getElementById("miniSeek") as HTMLInputElement | null
+  if (miniSeek) {
+    miniSeek.addEventListener("click", (e) => e.stopPropagation())
+    miniSeek.addEventListener("pointerdown", (e) => {
+      e.stopPropagation()
+      isMiniSeekDragging = true
+    })
+    miniSeek.addEventListener("pointerup", (e) => {
+      e.stopPropagation()
+      isMiniSeekDragging = false
+    })
+    miniSeek.oninput = (e) => {
+      e.stopPropagation()
+      const audio = el<HTMLAudioElement>("player")
+      const pct = Number((e.target as HTMLInputElement).value) / 100
+      const { total } = getPlaybackTotals(audio)
+      if (total > 0) {
+        const targetAbsolute = total * pct
+        const curLbl = document.getElementById("miniCurrent")
+        if (curLbl) curLbl.textContent = fmtTime(targetAbsolute)
+      }
+    }
+    miniSeek.onchange = (e) => {
+      e.stopPropagation()
+      const audio = el<HTMLAudioElement>("player")
+      const pct = Number((e.target as HTMLInputElement).value) / 100
+      seekPlaybackToPercent(audio, pct)
       syncNowPlayingProgress(audio)
     }
   }

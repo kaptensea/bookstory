@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.2 - 2026-03-18
+
+### Added
+- Local audio proxy now fully supports range requests and Bearer authentication forwarding, enabling reliable seeking and playback of all file formats.
+- `forceDirectPlay` fallback path: if direct stream fails, the app requests a raw file URL from the server and routes it through a local `/direct-audio` proxy.
+- Additional proxy routes for HLS manifests and segments (`/hls-manifest`, `/hls-segment`) for future codec compatibility.
+
+### Fixed
+- Audiobooks in M4B/AAC/MP4 format now play correctly. On Linux, the `gst-libav` package must be installed (see **Audio Codec Requirements** in the README).
+- Removed scroll from the Now Playing full-screen view.
+- HEAD handler for audio proxy now returns the correct content-type from upstream instead of always reporting `audio/mpeg`.
+
 ## 1.1.1 - 2026-03-18
 
 ### Fixed

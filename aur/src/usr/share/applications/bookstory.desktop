@@ -1,0 +1,9 @@
+[Desktop Entry]
+Categories=
+Comment=Audiobookshelf desktop client
+Exec=bookstory
+StartupWMClass=bookstory
+Icon=bookstory
+Name=bookstory
+Terminal=false
+Type=Application

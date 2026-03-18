@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "bookstory",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "identifier": "se.swetux.bookstory",
 
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -39,7 +39,7 @@
     ],
     "windows": {
       "wix": {
-        "version": "1.1.1.0"
+        "version": "1.1.2.0"
       }
     }
   }
