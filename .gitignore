@@ -32,3 +32,8 @@ Thumbs.db
 
 # TypeScript build cache
 *.tsbuildinfo
+aur/
+pkg/
+src/
+*.deb
+*.pkg.tar.zst
