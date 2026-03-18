@@ -3,7 +3,7 @@
   <h1>Bookstory</h1>
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
-  ![Version](https://img.shields.io/badge/version-1.1.1-blue)
+  ![Version](https://img.shields.io/badge/version-1.1.2-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
   ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
   ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8D8)
@@ -59,6 +59,44 @@ Feature requests and general feedback are welcome too — just open an issue and
 
 - A running [Audiobookshelf](https://www.audiobookshelf.org) server (self-hosted)
 - A valid Audiobookshelf account
+
+## Audio Codec Requirements
+
+Bookstory streams audio through the system's native media pipeline. Some audiobook formats — such as **M4B, AAC, and MP4** — require additional codec support that is not always bundled with the operating system.
+
+If a book fails to play (especially books that work fine on other clients), you likely need to install the FFmpeg GStreamer plugin package for your OS.
+
+### Linux
+
+WebKitGTK (the underlying browser engine Tauri uses on Linux) plays audio via **GStreamer**. AAC/M4B/MP4 decoding requires the `gst-libav` package (FFmpeg bridge).
+
+**Arch Linux / Manjaro:**
+```bash
+sudo pacman -S gst-libav
+```
+
+**Ubuntu / Debian / Linux Mint:**
+```bash
+sudo apt install gstreamer1.0-libav
+```
+
+**Fedora:**
+```bash
+sudo dnf install gstreamer1-libav
+```
+
+**openSUSE:**
+```bash
+sudo zypper install gstreamer-plugins-libav
+```
+
+Without this package, books encoded as M4B/AAC will silently fail to load in the player. MP3 (`.mp3`) books do not require this and will work without it.
+
+### Windows
+
+Windows ships with native H.264/AAC codec support via the built-in Media Foundation stack. No additional packages are required on Windows 10 or Windows 11.
+
+If you are on an older or stripped-down Windows installation and playback still fails for M4B/AAC content, installing the [K-Lite Codec Pack](https://www.codecguide.com/download_kl.htm) (Basic edition is enough) will resolve it.
 
 ## Platform Compatibility
 

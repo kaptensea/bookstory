@@ -44,6 +44,12 @@ struct KeyQuery {
     k: String,
 }
 
+#[derive(Deserialize)]
+struct HlsUrlQuery {
+    url: String,
+    k: String,
+}
+
 /* -------------------- Keyring helpers -------------------- */
 
 fn account_key(server_url: &str, username: &str) -> String {
@@ -137,6 +143,11 @@ async fn audio_proxy(
 ) -> Result<Response, StatusCode> {
     let state = &shared.0;
 
+    eprintln!(
+        "[audio-proxy] request library_id={} file_ino={} method={}",
+        library_id, file_ino, method
+    );
+
     if q.k != state.secret {
         return Err(StatusCode::UNAUTHORIZED);
     }
@@ -158,20 +169,6 @@ async fn audio_proxy(
     let token = get_token_from_keyring(&server_url, &username)
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // HEAD: WebView frågar ofta först. Svara OK med relevanta headers.
-    if method == Method::HEAD {
-        let mut response = Response::new(axum::body::Body::empty());
-        *response.status_mut() = StatusCode::OK;
-        let mut h = axum::http::HeaderMap::new();
-        h.insert(CONTENT_TYPE, HeaderValue::from_static("audio/mpeg"));
-        h.insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
-        *response.headers_mut() = h;
-        return Ok(response);
-    }
-
-
-
-
     let client = reqwest::Client::new();
 
     let range_hdr = headers
@@ -179,7 +176,6 @@ async fn audio_proxy(
     .and_then(|v| v.to_str().ok())
     .map(|s| s.to_string());
 
-    // /play -> audioTracks[0].contentUrl
     let target = format!(
         "{}/api/items/{}/file/{}?token={}",
         server_url,
@@ -188,8 +184,33 @@ async fn audio_proxy(
         token
     );
 
-    let mut req = client.get(&target);
+    eprintln!(
+        "[audio-proxy] upstream target={} range={:?}",
+        target, range_hdr
+    );
 
+    // HEAD: proxy to upstream to get the real content-type (never lie about the format)
+    if method == Method::HEAD {
+        let res = client.get(&target)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+            .await
+            .map_err(|_| StatusCode::BAD_GATEWAY)?;
+        let real_ct = res.headers().get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("audio/mpeg")
+            .to_string();
+        let mut response = Response::new(axum::body::Body::empty());
+        *response.status_mut() = StatusCode::OK;
+        response.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_str(&real_ct).unwrap_or(HeaderValue::from_static("audio/mpeg")),
+        );
+        response.headers_mut().insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+        return Ok(response);
+    }
+
+    let mut req = client.get(&target);
     if let Some(rng) = &range_hdr {
         req = req.header(reqwest::header::RANGE, rng);
     }
@@ -198,6 +219,12 @@ async fn audio_proxy(
     .send()
     .await
     .map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    eprintln!(
+        "[audio-proxy] upstream status={} content-type={:?}",
+        res.status(),
+        res.headers().get(CONTENT_TYPE)
+    );
 
 
     let mut out_headers = axum::http::HeaderMap::new();
@@ -233,6 +260,236 @@ async fn audio_proxy(
     *response.headers_mut() = out_headers;
 
     Ok(response)
+}
+
+/* -------------------- Direct-audio proxy (for format-fallback URLs) -------------------- */
+
+async fn direct_audio_proxy(
+    method: Method,
+    State(shared): State<SharedState>,
+    Query(q): Query<HlsUrlQuery>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    let state = &shared.0;
+    if q.k != state.secret {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let token = state
+        .active_server_url
+        .lock()
+        .unwrap()
+        .clone()
+        .zip(state.active_username.lock().unwrap().clone())
+        .and_then(|(srv, usr)| get_token_from_keyring(&srv, &usr).ok())
+        .unwrap_or_default();
+
+    let range_hdr = headers
+        .get("range")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    eprintln!("[direct-audio] url={} range={:?}", q.url, range_hdr);
+
+    let client = reqwest::Client::new();
+
+    // HEAD: fetch real content-type from upstream
+    if method == Method::HEAD {
+        let res = client.get(&q.url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+            .await
+            .map_err(|_| StatusCode::BAD_GATEWAY)?;
+        let real_ct = res.headers().get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("audio/mpeg")
+            .to_string();
+        let mut response = Response::new(axum::body::Body::empty());
+        *response.status_mut() = StatusCode::OK;
+        response.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_str(&real_ct).unwrap_or(HeaderValue::from_static("audio/mpeg")),
+        );
+        response.headers_mut().insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+        return Ok(response);
+    }
+
+    let mut req = client.get(&q.url)
+        .header("Authorization", format!("Bearer {}", token));
+    if let Some(rng) = &range_hdr {
+        req = req.header(reqwest::header::RANGE, rng);
+    }
+    let res = req.send().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    let status = StatusCode::from_u16(res.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let upstream_ct = res.headers().get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("audio/mpeg")
+        .to_string();
+
+    let mut out_headers = axum::http::HeaderMap::new();
+    out_headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_str(&upstream_ct).unwrap_or(HeaderValue::from_static("audio/mpeg")),
+    );
+    out_headers.insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    for h in ["content-length", "content-range"] {
+        if let Some(v) = res.headers().get(h) {
+            if let Ok(hname) = axum::http::HeaderName::from_bytes(h.as_bytes()) {
+                if let Ok(hval) = HeaderValue::from_bytes(v.as_bytes()) {
+                    out_headers.insert(hname, hval);
+                }
+            }
+        }
+    }
+
+    let body = axum::body::Body::from_stream(res.bytes_stream());
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    *response.headers_mut() = out_headers;
+    Ok(response)
+}
+
+/* -------------------- HLS proxy -------------------- */
+
+async fn hls_manifest_proxy(
+    State(shared): State<SharedState>,
+    Query(q): Query<HlsUrlQuery>,
+) -> Result<Response, StatusCode> {
+    let state = &shared.0;
+    if q.k != state.secret {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let port = state.port;
+    let secret = state.secret.clone();
+
+    // Get auth token to fetch manifest from ABS server
+    let token = state
+        .active_server_url
+        .lock()
+        .unwrap()
+        .clone()
+        .zip(state.active_username.lock().unwrap().clone())
+        .and_then(|(srv, usr)| get_token_from_keyring(&srv, &usr).ok())
+        .unwrap_or_default();
+
+    eprintln!("[hls-manifest] fetching {}", q.url);
+
+    let client = reqwest::Client::new();
+    let mut req = client.get(&q.url);
+    if !token.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    let resp = req.send().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    if !resp.status().is_success() {
+        eprintln!("[hls-manifest] upstream status={}", resp.status());
+        return Err(StatusCode::BAD_GATEWAY);
+    }
+
+    let text = resp.text().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    // Resolve the base URL for relative segment paths
+    let base_url = q.url.rfind('/').map(|i| &q.url[..=i]).unwrap_or("");
+
+    // Rewrite each non-comment, non-empty line to go through our segment proxy
+    let rewritten: String = text
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return line.to_string();
+            }
+            // Resolve to absolute URL
+            let abs = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                trimmed.to_string()
+            } else {
+                format!("{}{}", base_url, trimmed)
+            };
+            let encoded = percent_encode_url(&abs);
+            format!(
+                "http://127.0.0.1:{}/hls-segment?url={}&k={}",
+                port, encoded, secret
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    eprintln!("[hls-manifest] rewritten {} segments", rewritten.lines().filter(|l| l.contains("/hls-segment")).count());
+
+    let mut response = Response::new(axum::body::Body::from(rewritten));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/vnd.apple.mpegurl"),
+    );
+    Ok(response)
+}
+
+async fn hls_segment_proxy(
+    State(shared): State<SharedState>,
+    Query(q): Query<HlsUrlQuery>,
+) -> Result<Response, StatusCode> {
+    let state = &shared.0;
+    if q.k != state.secret {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let token = state
+        .active_server_url
+        .lock()
+        .unwrap()
+        .clone()
+        .zip(state.active_username.lock().unwrap().clone())
+        .and_then(|(srv, usr)| get_token_from_keyring(&srv, &usr).ok())
+        .unwrap_or_default();
+
+    let client = reqwest::Client::new();
+    let mut req = client.get(&q.url);
+    if !token.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    let resp = req.send().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+
+    let ct = resp
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("video/mp2t")
+        .to_string();
+
+    let body = axum::body::Body::from_stream(resp.bytes_stream());
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_str(&ct).unwrap_or(HeaderValue::from_static("video/mp2t")),
+    );
+    Ok(response)
+}
+
+fn percent_encode_url(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9'
+            | '-' | '_' | '.' | '~'
+            | ':' | '/' | '?' | '#' | '[' | ']' | '@'
+            | '!' | '$' | '&' | '\'' | '(' | ')'
+            | '*' | '+' | ',' | ';' | '=' => vec![c],
+            c => {
+                let mut buf = [0u8; 4];
+                let encoded: Vec<char> = c
+                    .encode_utf8(&mut buf)
+                    .bytes()
+                    .flat_map(|b| format!("%{:02X}", b).chars().collect::<Vec<_>>())
+                    .collect();
+                encoded
+            }
+        })
+        .collect()
 }
 
 /* -------------------- Commands used by frontend -------------------- */
@@ -615,6 +872,11 @@ async fn abs_start_playback(
         format!("{}/api/items/{}/play", server_url, item_id)
     };
 
+    eprintln!(
+        "[abs-start-playback] item_id={} episode_id={:?} url={}",
+        item_id, episode_id, url
+    );
+
     let body = serde_json::json!({
         "deviceInfo": {
             "clientName": "Bookstory",
@@ -631,6 +893,8 @@ async fn abs_start_playback(
     .await
     .map_err(|e| format!("Network error: {}", e))?;
 
+    eprintln!("[abs-start-playback] status={}", resp.status());
+
     if !resp.status().is_success() {
         return Err(format!("Session start failed (HTTP {})", resp.status()));
     }
@@ -638,6 +902,92 @@ async fn abs_start_playback(
     resp.json::<serde_json::Value>()
     .await
     .map_err(|e| format!("Invalid response: {}", e))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn abs_resolve_playback_url(
+    state: tauri::State<'_, SharedState>,
+    server_url: String,
+    username: String,
+    item_id: String,
+    episode_id: Option<String>,
+) -> Result<String, String> {
+    let server_url = normalize_server_url(server_url);
+    let token = get_token_from_keyring(&server_url, &username)?;
+
+    let url = if let Some(ref ep_id) = episode_id {
+        format!("{}/api/items/{}/play/{}", server_url, item_id, ep_id)
+    } else {
+        format!("{}/api/items/{}/play", server_url, item_id)
+    };
+
+    eprintln!(
+        "[abs-resolve-playback-url] item_id={} episode_id={:?} url={}",
+        item_id, episode_id, url
+    );
+
+    let body = serde_json::json!({
+        "forceDirectPlay": true,
+        "deviceInfo": {
+            "clientName": "Bookstory",
+            "deviceId": "bookstory-desktop",
+            "platform": "desktop"
+        }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    eprintln!("[abs-resolve-playback-url] status={}", resp.status());
+
+    if !resp.status().is_success() {
+        return Err(format!("Playback url resolve failed (HTTP {})", resp.status()));
+    }
+
+    let data = resp
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Invalid response: {}", e))?;
+
+    let mut content_url = data
+        .pointer("/audioTracks/0/contentUrl")
+        .and_then(|v| v.as_str())
+        .or_else(|| data.pointer("/media/audioTracks/0/contentUrl").and_then(|v| v.as_str()))
+        .or_else(|| data.pointer("/audioTrack/contentUrl").and_then(|v| v.as_str()))
+        .or_else(|| data.pointer("/streamUrl").and_then(|v| v.as_str()))
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Could not find contentUrl in playback response".to_string())?;
+
+    if content_url.starts_with('/') {
+        content_url = format!("{}{}", server_url, content_url);
+    }
+
+    eprintln!("[abs-resolve-playback-url] resolved={}", content_url);
+
+    let s = &state.0;
+    let encoded = percent_encode_url(&content_url);
+
+    // All external URLs must go through the local proxy — the WebView can't reach the ABS server directly
+    if content_url.contains(".m3u8") {
+        let local_url = format!(
+            "http://127.0.0.1:{}/hls-manifest?url={}&k={}",
+            s.port, encoded, s.secret
+        );
+        eprintln!("[abs-resolve-playback-url] wrapping as hls proxy={}", local_url);
+        return Ok(local_url);
+    }
+
+    let local_url = format!(
+        "http://127.0.0.1:{}/direct-audio?url={}&k={}",
+        s.port, encoded, s.secret
+    );
+    eprintln!("[abs-resolve-playback-url] wrapping as direct-audio proxy={}", local_url);
+    Ok(local_url)
 }
 
 #[tauri::command]
@@ -867,6 +1217,9 @@ pub fn run() {
         tauri::async_runtime::spawn(async move {
             let router = Router::new()
             .route("/audio/:library_id/:index", get(audio_proxy).head(audio_proxy))
+            .route("/direct-audio", get(direct_audio_proxy).head(direct_audio_proxy))
+            .route("/hls-manifest", get(hls_manifest_proxy))
+            .route("/hls-segment", get(hls_segment_proxy))
             .with_state(shared);
 
             axum::serve(listener, router)
@@ -897,6 +1250,7 @@ pub fn run() {
         abs_set_active_user,
         abs_local_player_url,
         abs_stream_chapter_url,
+        abs_resolve_playback_url,
         abs_trigger_play
     ])
     .run(tauri::generate_context!())

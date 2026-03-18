@@ -890,7 +890,7 @@ margin: 18px 0 0 0;
   transition: background-image .6s ease;
 }
 
-.now-playing > *:not(#npBg) {
+.now-playing > *:not(#npBg):not(#closeNowPlaying) {
   position: relative;
   z-index: 1;
 }
@@ -906,7 +906,7 @@ margin: 18px 0 0 0;
   justify-content:center;
   padding:110px 20px 80px;
   box-sizing:border-box;
-  overflow:auto;
+  overflow:hidden;
 }
 
 .now-playing img{
@@ -958,6 +958,12 @@ margin-top:8px;
 accent-color: var(--accent);
 height:6px;
 cursor: pointer;
+padding:0;
+}
+
+#npSeek::-webkit-slider-runnable-track{
+margin-right:-7px;
+margin-left:-7px;
 }
 
 #npTimeRow{
@@ -1020,13 +1026,14 @@ cursor: pointer;
 
 #closeNowPlaying{
 position:absolute;
-top:58px;
-left:16px;
+top:22px;
+left:22px;
 font-size:16px;
 height:40px;
 min-width:40px;
 padding:0;
 border-radius:999px;
+z-index:10;
 }
 
 #miniPlayer {
@@ -1104,21 +1111,22 @@ margin-bottom:2px;
 
 #miniProgressWrap{
 width:calc(100% - 10px);
-height:5px;
-background:rgba(255,255,255,.12);
-border-radius:999px;
-overflow:hidden;
 margin:2px 0;
 margin-left:10px;
-cursor:pointer;
 }
 
-#miniProgressBar{
-height:100%;
-width:0%;
-background: linear-gradient(90deg, #10b981, #34d399);
-box-shadow: 0 0 8px rgba(16,185,129,.55);
-transition: width .4s linear;
+#miniSeek{
+width:100%;
+height:5px;
+margin:0;
+accent-color: var(--accent);
+cursor:pointer;
+padding:0;
+}
+
+#miniSeek::-webkit-slider-runnable-track{
+margin-right:-7px;
+margin-left:-7px;
 }
 
 #miniTimeRow{
