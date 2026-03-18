@@ -2097,7 +2097,6 @@ async function renderLibraryGrid() {
   container.classList.add("grid");
 
   const sort = (el<HTMLSelectElement>("sortSelect")?.value ?? "recent");
-
   const list = currentLibraryItems.slice();
   if (sort === "az") list.sort((a,b) => (a?.media?.metadata?.title ?? "").localeCompare(b?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
   if (sort === "za") list.sort((a,b) => (b?.media?.metadata?.title ?? "").localeCompare(a?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
@@ -2267,7 +2266,7 @@ async function renderLibraryGrid() {
     }
 
     coverWrap.append(img, doneBadge, menuBtn, menu);
-      coverWrap.prepend(bgImg);
+    coverWrap.prepend(bgImg);
     card.append(coverWrap, meta);
     card.onclick = () => showItemDetail(String(itemId));
     container.appendChild(card);
