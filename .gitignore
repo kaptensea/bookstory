@@ -34,8 +34,6 @@ Thumbs.db
 *.tsbuildinfo
 aur/
 pkg/
-src/
 *.deb
 *.pkg.tar.zst
 node_modules/
-dist/
