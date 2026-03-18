@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.1 - 2026-03-18
+
+### Fixed
+- Pressing Enter in the login password field now triggers the same sign-in flow as the Login button.
+- Clicking anywhere in the sidebar now consistently exits open Settings/Detail overlays before navigation.
+- Settings button now works as a true toggle (pressing it again closes Settings).
+- Library card three-dot action menu now stays visible/clickable above cover layers.
+- Added a subtle hover affordance on the three-dot action button for clearer interaction feedback.
+
 ## 1.1.0 - 2026-03-18
 
 ### Added

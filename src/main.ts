@@ -376,6 +376,12 @@ function hideSettingsPage() {
   show(el("libraryItemsView"), true);
 }
 
+function isVisible(id: string): boolean {
+  const node = document.getElementById(id);
+  if (!node) return false;
+  return node.style.display !== "none";
+}
+
 function renderSettingsPage() {
   const view = el<HTMLDivElement>("settingsView");
   view.innerHTML = `
@@ -963,12 +969,52 @@ async function logOut(serverUrl: string, username: string) {
 document.addEventListener("click", async (e) => {
   const t = e.target as HTMLElement | null;
   if (!t) return;
+
+  // Click on the backdrop area should behave like pressing Back.
+  const settingsView = document.getElementById("settingsView");
+  if (
+    isVisible("settingsView") &&
+    settingsView &&
+    settingsView.contains(t) &&
+    !t.closest(".settings-card")
+  ) {
+    hideSettingsPage();
+    return;
+  }
+
+  const detailView = document.getElementById("itemDetailView");
+  if (
+    isVisible("itemDetailView") &&
+    detailView &&
+    detailView.contains(t) &&
+    !t.closest("#itemDetailView .card")
+  ) {
+    await backFromDetail();
+    return;
+  }
+
   const clickable = t.closest("[id]") as HTMLElement | null;
   const id = clickable?.id;
+
+  if (t.closest("#sidebar")) {
+    if (isVisible("settingsView") && id !== "settingsBtn") {
+      hideSettingsPage();
+    }
+    if (isVisible("itemDetailView")) {
+      await backFromDetail();
+    }
+  }
   try {
     if (id === "loginBtn") await handleLogin();
     if (id === "logoutBtn") await handleLogout();
-    if (id === "settingsBtn") showSettingsPage();
+    if (id === "settingsBtn") {
+      if (isVisible("settingsView")) {
+        hideSettingsPage();
+        return;
+      }
+      showSettingsPage();
+      return;
+    }
     if (id === "settingsBackBtn") hideSettingsPage();
     if (id === "settingsCheckUpdatesBtn") {
       lastUpdateState = null;
@@ -1491,6 +1537,9 @@ async function renderLibraries(libraries: any) {
   if (currentLibraryId) select.value = currentLibraryId;
 
   select.onchange = async () => {
+    if (isVisible("settingsView")) hideSettingsPage();
+    if (isVisible("itemDetailView")) await backFromDetail();
+
     const { serverUrl, username } = getSaved();
     const grid = el("libraryItemsView");
     grid.classList.add("loading");
@@ -1983,7 +2032,11 @@ function showLibraryItems(name: string, items: any) {
 function wireSortSelect() {
   const sortSelect = el<HTMLSelectElement>("sortSelect");
   sortSelect.value = appSettings.defaultSort;
-  sortSelect.addEventListener("change", () => { if (currentLibraryItems.length) void renderLibraryGrid(); });
+  sortSelect.addEventListener("change", async () => {
+    if (isVisible("settingsView")) hideSettingsPage();
+    if (isVisible("itemDetailView")) await backFromDetail();
+    if (currentLibraryItems.length) void renderLibraryGrid();
+  });
 }
 
 async function renderLibraryGrid() {
@@ -2041,6 +2094,7 @@ async function renderLibraryGrid() {
     doneBadge.style.color = "#fff";
     doneBadge.style.fontWeight = "800";
     doneBadge.style.fontSize = "14px";
+    doneBadge.style.zIndex = "5";
     doneBadge.dataset.libraryDoneItem = String(itemId);
 
     const menuBtn = document.createElement("button");
@@ -2060,6 +2114,18 @@ async function renderLibraryGrid() {
     menuBtn.style.fontSize = "18px";
     menuBtn.style.lineHeight = "1";
     menuBtn.style.cursor = "pointer";
+    menuBtn.style.transition = "background .12s ease, border-color .12s ease, transform .12s ease";
+    menuBtn.style.zIndex = "6";
+    menuBtn.addEventListener("mouseenter", () => {
+      menuBtn.style.background = "rgba(0,0,0,.72)";
+      menuBtn.style.borderColor = "rgba(255,255,255,.34)";
+      menuBtn.style.transform = "scale(1.04)";
+    });
+    menuBtn.addEventListener("mouseleave", () => {
+      menuBtn.style.background = "rgba(0,0,0,.55)";
+      menuBtn.style.borderColor = "rgba(255,255,255,.24)";
+      menuBtn.style.transform = "scale(1)";
+    });
 
     const menu = document.createElement("div");
     menu.style.position = "absolute";
@@ -2073,7 +2139,7 @@ async function renderLibraryGrid() {
     menu.style.border = "1px solid rgba(255,255,255,.2)";
     menu.style.borderRadius = "10px";
     menu.style.background = "rgba(20,22,24,.96)";
-    menu.style.zIndex = "4";
+    menu.style.zIndex = "7";
 
     const markPlayedBtn = document.createElement("button");
     markPlayedBtn.type = "button";
@@ -3040,6 +3106,15 @@ async function boot() {
 
     const audio = el<HTMLAudioElement>("player")
     audio.volume = Number((e.target as HTMLInputElement).value)
+  }
+
+  const passwordInput = document.getElementById("password") as HTMLInputElement | null;
+  if (passwordInput) {
+    passwordInput.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      await handleLogin();
+    });
   }
 
   const npSeek = document.getElementById("npSeek") as HTMLInputElement | null
