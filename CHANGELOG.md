@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.0 - 2026-03-18
+
+### Added
+- German localization for the current app UI and settings.
+- In-app update checking with platform-aware guidance and release link handling.
+- AUR package support for `bookstory-bin`.
+
+### Changed
+- Library sorting now uses the selected app language locale instead of always using Swedish collation.
+- Library cover cards use a lighter static backdrop instead of the previous blurred background image effect for better responsiveness.
+
+### Fixed
+- External release links now open correctly through the Tauri opener plugin.
+- Library hover feedback feels more immediate by avoiding the heavier blurred cover treatment in the grid.
+
 ## 1.0.0 - 2026-03-18
 
 ### Added

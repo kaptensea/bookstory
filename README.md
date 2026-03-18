@@ -3,7 +3,7 @@
   <h1>Bookstory</h1>
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
-  ![Version](https://img.shields.io/badge/version-1.0.0-blue)
+  ![Version](https://img.shields.io/badge/version-1.1.0-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
   ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
   ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8D8)
@@ -23,6 +23,8 @@
 - **Podcast episode progress** synced using episode-aware API endpoints
 - **Mark played / unplayed** in Continue Listening, Library cards, and Podcast episode rows
 - **Settings page** for language, default sort, seek seconds, and continue-card animations
+- **Runtime localization** in English, Swedish, and German
+- **In-app update notice** with platform-aware update guidance
 - **Auto-login** — credentials stored securely in the system keyring
 - **Custom window controls** and native desktop feel
 - **Cover artwork** and metadata display throughout
@@ -80,6 +82,10 @@ This project includes launcher/build logic intended to keep compatibility consis
 
 Pre-built binaries for Linux and Windows are available on the [Releases](https://github.com/kaptensea/bookstory/releases) page.
 
+Arch Linux users can also install the AUR package:
+
+- `yay -S bookstory-bin`
+
 Bookstory is desktop-only (Linux and Windows).
 
 ### Versioning and GitHub Builds
@@ -89,7 +95,7 @@ Releases are version-tag driven.
 Typical flow:
 1. Update versions in project metadata.
 2. Commit and push to `main`.
-3. Create and push a tag like `v1.0.0`.
+3. Create and push a tag like `v1.1.0`.
 4. GitHub Actions builds artifacts and publishes them to Releases.
 
 Use one tag push per release to avoid duplicate workflow runs.

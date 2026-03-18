@@ -13,6 +13,7 @@ use axum::{
 };
 
 use rand::{distributions::Alphanumeric, Rng};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 const SERVICE_NAME: &str = "bookstory";
@@ -54,6 +55,73 @@ fn get_token_from_keyring(server_url: &str, username: &str) -> Result<String, St
     let entry = keyring::Entry::new(SERVICE_NAME, &key)
     .map_err(|e| format!("Keyring error: {}", e))?;
     entry.get_password().map_err(|e| format!("Keyring error: {}", e))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallContext {
+    platform: String,
+    install_kind: String,
+    executable_path: String,
+}
+
+#[cfg(target_os = "linux")]
+fn command_succeeds(program: &str, args: &[&str]) -> bool {
+    Command::new(program)
+        .args(args)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn detect_linux_install_kind(executable_path: &str) -> String {
+    let lower = executable_path.to_ascii_lowercase();
+
+    if std::env::var_os("APPIMAGE").is_some()
+        || lower.ends_with(".appimage")
+        || lower.contains("/.mount_")
+    {
+        return "appimage".to_string();
+    }
+
+    if command_succeeds("pacman", &["-Qm", "bookstory-bin"]) {
+        return "aur".to_string();
+    }
+
+    if command_succeeds("dpkg-query", &["-S", executable_path]) {
+        return "deb".to_string();
+    }
+
+    if command_succeeds("rpm", &["-qf", executable_path]) {
+        return "rpm".to_string();
+    }
+
+    if executable_path.starts_with("/usr/") || executable_path.starts_with("/opt/") {
+        return "system".to_string();
+    }
+
+    "unknown".to_string()
+}
+
+#[tauri::command]
+fn abs_get_install_context() -> InstallContext {
+    let executable_path = std::env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    #[cfg(target_os = "linux")]
+    let install_kind = detect_linux_install_kind(&executable_path);
+
+    #[cfg(not(target_os = "linux"))]
+    let install_kind = "unknown".to_string();
+
+    InstallContext {
+        platform: std::env::consts::OS.to_string(),
+        install_kind,
+        executable_path,
+    }
 }
 
 /* -------------------- Local HTTP proxy -------------------- */
@@ -773,6 +841,7 @@ async fn abs_mark_unplayed(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+    .plugin(tauri_plugin_opener::init())
     .setup(|app| {
         let secret: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -824,6 +893,7 @@ pub fn run() {
         abs_update_progress,
         abs_mark_played,
         abs_mark_unplayed,
+        abs_get_install_context,
         abs_set_active_user,
         abs_local_player_url,
         abs_stream_chapter_url,

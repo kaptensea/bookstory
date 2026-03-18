@@ -1,16 +1,36 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import coverMissingUrl from "./assets/covermissing.svg";
 
 type Json = any;
 
+type AppLanguage = "en" | "sv" | "de";
+
 type AppSettings = {
-  language: "en" | "sv";
+  language: AppLanguage;
   defaultSort: "recent" | "az" | "za";
   seekSeconds: number;
   continueAnimations: boolean;
   showAuthor: boolean;
+};
+
+type InstallKind = "aur" | "appimage" | "deb" | "rpm" | "system" | "unknown";
+
+type InstallContext = {
+  platform: string;
+  installKind: InstallKind;
+  executablePath: string;
+};
+
+type UpdateState = {
+  currentVersion: string;
+  latestVersion: string | null;
+  latestUrl: string;
+  hasUpdate: boolean;
+  installContext: InstallContext;
+  error?: string;
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -21,7 +41,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showAuthor: false,
 };
 
-const I18N: Record<"en" | "sv", Record<string, string>> = {
+const I18N: Record<AppLanguage, Record<string, string>> = {
   en: {
     "login.subtitle": "Connect to your Audiobookshelf server",
     "login.server": "Server address",
@@ -54,10 +74,26 @@ const I18N: Record<"en" | "sv", Record<string, string>> = {
     "settings.language": "Language",
     "settings.lang.en": "English",
     "settings.lang.sv": "Swedish",
+    "settings.lang.de": "German",
     "settings.defaultSort": "Default sort",
     "settings.skipSeconds": "Skip seconds (back/forward)",
     "settings.animations": "Enable Continue card animations",
     "settings.showAuthor": "Show author name on book cards",
+    "settings.updates": "Updates",
+    "settings.checkUpdates": "Check for updates",
+    "settings.checkingUpdates": "Checking for updates...",
+    "settings.currentVersion": "Installed version: {{version}}",
+    "settings.noUpdates": "You already have the latest version.",
+    "settings.updateAvailable": "Version {{version}} is available.",
+    "settings.openRelease": "Open release",
+    "update.banner.dismiss": "Dismiss",
+    "settings.updateHint.aur": "Update with your AUR helper, for example: yay -Syu bookstory-bin",
+    "settings.updateHint.appimage": "Download the latest AppImage from GitHub Releases.",
+    "settings.updateHint.deb": "Install the latest .deb package from GitHub Releases.",
+    "settings.updateHint.rpm": "Install the latest .rpm package from GitHub Releases or update through your RPM package manager.",
+    "settings.updateHint.system": "Update this installation through the same package source you used originally.",
+    "settings.updateHint.unknown": "Open the latest GitHub release to update this installation.",
+    "settings.updateFailed": "Could not check for updates right now.",
     "settings.save": "Save settings",
     "settings.reset": "Reset defaults",
     "settings.saved": "Settings saved",
@@ -102,10 +138,26 @@ const I18N: Record<"en" | "sv", Record<string, string>> = {
     "settings.language": "Spr\u00e5k",
     "settings.lang.en": "Engelska",
     "settings.lang.sv": "Svenska",
+    "settings.lang.de": "Tyska",
     "settings.defaultSort": "Standardsortering",
     "settings.skipSeconds": "Hoppa sekunder (bak/fram)",
     "settings.animations": "Aktivera animationer i Forts\u00e4tt lyssna",
     "settings.showAuthor": "Visa f\u00f6rfattare p\u00e5 bokskort",
+    "settings.updates": "Uppdateringar",
+    "settings.checkUpdates": "S\u00f6k efter uppdateringar",
+    "settings.checkingUpdates": "S\u00f6ker efter uppdateringar...",
+    "settings.currentVersion": "Installerad version: {{version}}",
+    "settings.noUpdates": "Du har redan senaste versionen.",
+    "settings.updateAvailable": "Version {{version}} finns tillg\u00e4nglig.",
+    "settings.openRelease": "\u00d6ppna release",
+    "update.banner.dismiss": "D\u00f6lj",
+    "settings.updateHint.aur": "Uppdatera med din AUR-hj\u00e4lpare, till exempel: yay -Syu bookstory-bin",
+    "settings.updateHint.appimage": "Ladda ner senaste AppImage fr\u00e5n GitHub Releases.",
+    "settings.updateHint.deb": "Installera senaste .deb-paketet fr\u00e5n GitHub Releases.",
+    "settings.updateHint.rpm": "Installera senaste .rpm-paketet fr\u00e5n GitHub Releases eller uppdatera via din RPM-pakethanterare.",
+    "settings.updateHint.system": "Uppdatera den h\u00e4r installationen via samma paketk\u00e4lla som du anv\u00e4nde fr\u00e5n b\u00f6rjan.",
+    "settings.updateHint.unknown": "\u00d6ppna senaste GitHub-releasen f\u00f6r att uppdatera den h\u00e4r installationen.",
+    "settings.updateFailed": "Det gick inte att kontrollera uppdateringar just nu.",
     "settings.save": "Spara inst\u00e4llningar",
     "settings.reset": "\u00c5terst\u00e4ll standard",
     "settings.saved": "Inst\u00e4llningar sparade",
@@ -117,6 +169,70 @@ const I18N: Record<"en" | "sv", Record<string, string>> = {
     "cover.missing": "Saknar omslag",
     "label.book.singular": "bok",
     "label.book.plural": "b\u00f6cker",
+  },
+  de: {
+    "login.subtitle": "Mit deinem Audiobookshelf-Server verbinden",
+    "login.server": "Serveradresse",
+    "login.username": "Benutzername",
+    "login.password": "Passwort",
+    "login.signIn": "Anmelden",
+    "sidebar.library": "Bibliothek",
+    "sidebar.sort": "Sortierung",
+    "sidebar.settings": "Einstellungen",
+    "sidebar.logout": "Abmelden",
+    "home.continue": "Weiterh\u00f6ren",
+    "home.empty": "Noch nichts in Wiedergabe.",
+    "home.loadingLibrary": "Bibliothek wird geladen...",
+    "np.buffering": "Puffert...",
+    "home.signedInAs": "Angemeldet als {{name}}",
+    "home.loggedOut": "Abgemeldet",
+    "sort.recent": "Zuletzt hinzugef\u00fcgt",
+    "sort.az": "A -> Z",
+    "sort.za": "Z -> A",
+    "common.item": "Element",
+    "common.back": "Zur\u00fcck",
+    "common.play": "Abspielen",
+    "common.resume": "Fortsetzen",
+    "common.playAgain": "Erneut abspielen",
+    "continue.resumeTitle": "Wiedergabe fortsetzen",
+    "continue.markPlayedTitle": "Als abgespielt markieren",
+    "menu.markPlayed": "Als abgespielt markieren",
+    "menu.resetUnplayed": "Zur\u00fccksetzen / als nicht abgespielt markieren",
+    "settings.title": "Einstellungen",
+    "settings.language": "Sprache",
+    "settings.lang.en": "Englisch",
+    "settings.lang.sv": "Schwedisch",
+    "settings.lang.de": "Deutsch",
+    "settings.defaultSort": "Standardsortierung",
+    "settings.skipSeconds": "Sekunden springen (zur\u00fcck/vor)",
+    "settings.animations": "Animationen f\u00fcr Weiterh\u00f6ren-Karten aktivieren",
+    "settings.showAuthor": "Autor auf Buchkarten anzeigen",
+    "settings.updates": "Updates",
+    "settings.checkUpdates": "Nach Updates suchen",
+    "settings.checkingUpdates": "Suche nach Updates...",
+    "settings.currentVersion": "Installierte Version: {{version}}",
+    "settings.noUpdates": "Du hast bereits die neueste Version.",
+    "settings.updateAvailable": "Version {{version}} ist verf\u00fcgbar.",
+    "settings.openRelease": "Release \u00f6ffnen",
+    "update.banner.dismiss": "Schlie\u00dfen",
+    "settings.updateHint.aur": "Mit deinem AUR-Helfer aktualisieren, zum Beispiel: yay -Syu bookstory-bin",
+    "settings.updateHint.appimage": "Die neueste AppImage-Datei aus den GitHub Releases herunterladen.",
+    "settings.updateHint.deb": "Das neueste .deb-Paket aus den GitHub Releases installieren.",
+    "settings.updateHint.rpm": "Das neueste .rpm-Paket aus den GitHub Releases installieren oder \u00fcber deinen RPM-Paketmanager aktualisieren.",
+    "settings.updateHint.system": "Diese Installation \u00fcber dieselbe Paketquelle aktualisieren, die du urspr\u00fcnglich verwendet hast.",
+    "settings.updateHint.unknown": "Den neuesten GitHub Release \u00f6ffnen, um diese Installation zu aktualisieren.",
+    "settings.updateFailed": "Updates konnten gerade nicht gepr\u00fcft werden.",
+    "settings.save": "Einstellungen speichern",
+    "settings.reset": "Standard wiederherstellen",
+    "settings.saved": "Einstellungen gespeichert",
+    "settings.defaultsRestored": "Standard wiederhergestellt",
+    "error.missingServer": "Serveradresse fehlt",
+    "error.invalidServer": "Der Server muss eine g\u00fcltige http://- oder https://-URL sein",
+    "error.missingUsername": "Benutzername fehlt",
+    "error.missingPassword": "Passwort fehlt",
+    "cover.missing": "Cover fehlt",
+    "label.book.singular": "Buch",
+    "label.book.plural": "B\u00fccher",
   }
 };
 
@@ -166,11 +282,19 @@ let podcastBadgeRunId = 0;
 let playbackLoadingActive = false;
 let playbackLoadingStartTime = 0;
 let playbackLoadingStartPos = 0;
+let currentAppVersion = "";
+let lastUpdateState: UpdateState | null = null;
+let updateCheckPromise: Promise<UpdateState> | null = null;
+let updateBannerDismissed = false;
 
 const preloadAudio = new Audio()
 preloadAudio.preload = "auto"
 
 let appSettings: AppSettings = loadSettings();
+
+function normalizeLanguage(value: unknown): AppLanguage {
+  return value === "sv" || value === "de" ? value : "en";
+}
 
 function loadSettings(): AppSettings {
   try {
@@ -178,7 +302,7 @@ function loadSettings(): AppSettings {
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw);
     return {
-      language: parsed?.language === "sv" ? "sv" : "en",
+      language: normalizeLanguage(parsed?.language),
       defaultSort: parsed?.defaultSort === "az" || parsed?.defaultSort === "za" ? parsed.defaultSort : "recent",
       seekSeconds: Math.max(5, Math.min(120, Number(parsed?.seekSeconds) || DEFAULT_SETTINGS.seekSeconds)),
       continueAnimations: parsed?.continueAnimations !== false,
@@ -265,6 +389,7 @@ function renderSettingsPage() {
       <select id="settingsLanguage">
         <option value="en">${tr("settings.lang.en")}</option>
         <option value="sv">${tr("settings.lang.sv")}</option>
+        <option value="de">${tr("settings.lang.de")}</option>
       </select>
 
       <label for="settingsDefaultSort">${tr("settings.defaultSort")}</label>
@@ -286,6 +411,16 @@ function renderSettingsPage() {
         <input id="settingsShowAuthor" type="checkbox" />
         <span>${tr("settings.showAuthor")}</span>
       </label>
+
+      <div class="settings-update-block">
+        <div class="settings-update-title">${tr("settings.updates")}</div>
+        <div id="settingsUpdateStatus" class="settings-update-status"></div>
+        <div id="settingsUpdateHint" class="settings-update-hint"></div>
+        <div class="settings-update-actions">
+          <button id="settingsCheckUpdatesBtn" type="button">${tr("settings.checkUpdates")}</button>
+          <button id="settingsOpenReleaseBtn" type="button" style="display:none;">${tr("settings.openRelease")}</button>
+        </div>
+      </div>
 
       <div class="settings-actions">
         <button id="settingsSaveBtn" type="button">${tr("settings.save")}</button>
@@ -309,6 +444,191 @@ function renderSettingsPage() {
   showAuthorEl.checked = appSettings.showAuthor;
 
   showAppVersion();
+  renderUpdateSection();
+  void checkForUpdates();
+}
+
+function normalizeVersion(version: string): string {
+  return String(version || "").trim().replace(/^v/i, "");
+}
+
+function parseVersion(version: string): number[] {
+  return normalizeVersion(version)
+    .split(".")
+    .map((part) => Number(part.replace(/[^0-9].*$/, "")) || 0);
+}
+
+function compareVersions(left: string, right: string): number {
+  const a = parseVersion(left);
+  const b = parseVersion(right);
+  const len = Math.max(a.length, b.length);
+  for (let index = 0; index < len; index += 1) {
+    const diff = (a[index] || 0) - (b[index] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function getDefaultInstallContext(): InstallContext {
+  return {
+    platform: typeof navigator !== "undefined" ? navigator.platform : "unknown",
+    installKind: "unknown",
+    executablePath: "",
+  };
+}
+
+async function getInstallContext(): Promise<InstallContext> {
+  try {
+    return await invoke<InstallContext>("abs_get_install_context");
+  } catch {
+    return getDefaultInstallContext();
+  }
+}
+
+function getUpdateHint(installContext: InstallContext): string {
+  const kind = installContext.installKind || "unknown";
+  return tr(`settings.updateHint.${kind}`);
+}
+
+function applySettingsUpdateBadge() {
+  const button = document.getElementById("settingsBtn");
+  if (!button) return;
+  const hasUpdate = Boolean(lastUpdateState?.hasUpdate);
+  button.classList.toggle("has-update", hasUpdate);
+  button.setAttribute(
+    "title",
+    hasUpdate && lastUpdateState?.latestVersion
+      ? tr("settings.updateAvailable", { version: lastUpdateState.latestVersion })
+      : tr("sidebar.settings"),
+  );
+}
+
+function renderUpdateBanner() {
+  const banner = document.getElementById("updateBanner");
+  const titleEl = document.getElementById("updateBannerTitle");
+  const hintEl = document.getElementById("updateBannerHint");
+  const openBtn = document.getElementById("updateBannerOpenBtn") as HTMLButtonElement | null;
+  const dismissBtn = document.getElementById("updateBannerDismissBtn") as HTMLButtonElement | null;
+
+  if (!banner || !titleEl || !hintEl || !openBtn || !dismissBtn) return;
+
+  openBtn.textContent = tr("settings.openRelease");
+  dismissBtn.textContent = tr("update.banner.dismiss");
+
+  const state = lastUpdateState;
+  const latestVersion = state?.latestVersion || null;
+
+  if (!state?.hasUpdate || !latestVersion || updateBannerDismissed) {
+    banner.style.display = "none";
+    return;
+  }
+
+  titleEl.textContent = tr("settings.updateAvailable", { version: latestVersion });
+  hintEl.textContent = getUpdateHint(state.installContext);
+  banner.style.display = "flex";
+}
+
+function renderUpdateSection(checking = false) {
+  const statusEl = document.getElementById("settingsUpdateStatus");
+  const hintEl = document.getElementById("settingsUpdateHint");
+  const checkBtn = document.getElementById("settingsCheckUpdatesBtn") as HTMLButtonElement | null;
+  const openBtn = document.getElementById("settingsOpenReleaseBtn") as HTMLButtonElement | null;
+
+  if (!statusEl || !hintEl || !checkBtn || !openBtn) return;
+
+  checkBtn.disabled = checking;
+  checkBtn.textContent = checking ? tr("settings.checkingUpdates") : tr("settings.checkUpdates");
+
+  if (checking) {
+    statusEl.textContent = tr("settings.checkingUpdates");
+    hintEl.textContent = currentAppVersion ? tr("settings.currentVersion", { version: currentAppVersion }) : "";
+    openBtn.style.display = "none";
+    renderUpdateBanner();
+    return;
+  }
+
+  if (!lastUpdateState) {
+    statusEl.textContent = currentAppVersion ? tr("settings.currentVersion", { version: currentAppVersion }) : "";
+    hintEl.textContent = "";
+    openBtn.style.display = "none";
+    renderUpdateBanner();
+    return;
+  }
+
+  if (lastUpdateState.error) {
+    statusEl.textContent = tr("settings.updateFailed");
+    hintEl.textContent = currentAppVersion ? tr("settings.currentVersion", { version: currentAppVersion }) : "";
+    openBtn.style.display = "inline-flex";
+    renderUpdateBanner();
+    return;
+  }
+
+  if (lastUpdateState.hasUpdate && lastUpdateState.latestVersion) {
+    statusEl.textContent = tr("settings.updateAvailable", { version: lastUpdateState.latestVersion });
+    hintEl.textContent = getUpdateHint(lastUpdateState.installContext);
+    openBtn.style.display = "inline-flex";
+    renderUpdateBanner();
+    return;
+  }
+
+  statusEl.textContent = tr("settings.noUpdates");
+  hintEl.textContent = currentAppVersion ? tr("settings.currentVersion", { version: currentAppVersion }) : "";
+  openBtn.style.display = "none";
+  renderUpdateBanner();
+}
+
+async function checkForUpdates(force = false): Promise<UpdateState> {
+  if (updateCheckPromise && !force) return updateCheckPromise;
+  if (lastUpdateState && !force) return lastUpdateState;
+
+  renderUpdateSection(true);
+
+  updateCheckPromise = (async () => {
+    const installContext = await getInstallContext();
+    const currentVersion = normalizeVersion(currentAppVersion || await getVersion());
+    const latestUrl = "https://github.com/kaptensea/bookstory/releases/latest";
+
+    try {
+      const response = await fetch("https://api.github.com/repos/kaptensea/bookstory/releases/latest", {
+        headers: {
+          Accept: "application/vnd.github+json",
+        },
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data = await response.json();
+      const latestVersion = normalizeVersion(data?.tag_name || data?.name || "");
+      const resolvedUrl = String(data?.html_url || latestUrl);
+
+      lastUpdateState = {
+        currentVersion,
+        latestVersion,
+        latestUrl: resolvedUrl,
+        hasUpdate: latestVersion ? compareVersions(latestVersion, currentVersion) > 0 : false,
+        installContext,
+      };
+    } catch (error) {
+      lastUpdateState = {
+        currentVersion,
+        latestVersion: null,
+        latestUrl,
+        hasUpdate: false,
+        installContext,
+        error: String(error),
+      };
+    }
+
+    applySettingsUpdateBadge();
+    renderUpdateSection(false);
+    return lastUpdateState;
+  })();
+
+  try {
+    return await updateCheckPromise;
+  } finally {
+    updateCheckPromise = null;
+  }
 }
 
 
@@ -650,6 +970,22 @@ document.addEventListener("click", async (e) => {
     if (id === "logoutBtn") await handleLogout();
     if (id === "settingsBtn") showSettingsPage();
     if (id === "settingsBackBtn") hideSettingsPage();
+    if (id === "settingsCheckUpdatesBtn") {
+      lastUpdateState = null;
+      await checkForUpdates(true);
+    }
+    if (id === "settingsOpenReleaseBtn") {
+      const url = lastUpdateState?.latestUrl || "https://github.com/kaptensea/bookstory/releases/latest";
+      await openUrl(url);
+    }
+    if (id === "updateBannerOpenBtn") {
+      const url = lastUpdateState?.latestUrl || "https://github.com/kaptensea/bookstory/releases/latest";
+      await openUrl(url);
+    }
+    if (id === "updateBannerDismissBtn") {
+      updateBannerDismissed = true;
+      renderUpdateBanner();
+    }
     if (id === "settingsSaveBtn") {
       const language = (document.getElementById("settingsLanguage") as HTMLSelectElement | null)?.value;
       const defaultSort = (document.getElementById("settingsDefaultSort") as HTMLSelectElement | null)?.value as AppSettings["defaultSort"] | undefined;
@@ -658,7 +994,7 @@ document.addEventListener("click", async (e) => {
       const showAuthor = Boolean((document.getElementById("settingsShowAuthor") as HTMLInputElement | null)?.checked);
 
       const next: AppSettings = {
-        language: language === "sv" ? "sv" : "en",
+        language: normalizeLanguage(language),
         defaultSort: defaultSort === "az" || defaultSort === "za" ? defaultSort : "recent",
         seekSeconds: Math.max(5, Math.min(120, isFinite(seekRaw) ? seekRaw : appSettings.seekSeconds)),
         continueAnimations,
@@ -1658,8 +1994,8 @@ async function renderLibraryGrid() {
   const sort = (el<HTMLSelectElement>("sortSelect")?.value ?? "recent");
 
   const list = currentLibraryItems.slice();
-  if (sort === "az") list.sort((a,b) => (a?.media?.metadata?.title ?? "").localeCompare(b?.media?.metadata?.title ?? "", "sv", { sensitivity: "base" }));
-  if (sort === "za") list.sort((a,b) => (b?.media?.metadata?.title ?? "").localeCompare(a?.media?.metadata?.title ?? "", "sv", { sensitivity: "base" }));
+  if (sort === "az") list.sort((a,b) => (a?.media?.metadata?.title ?? "").localeCompare(b?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
+  if (sort === "za") list.sort((a,b) => (b?.media?.metadata?.title ?? "").localeCompare(a?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
 
   const { serverUrl, username } = getSaved();
   const isPodcastLibrary = String(currentLibraryMediaType || "").toLowerCase() === "podcast";
@@ -2661,12 +2997,13 @@ async function stopPlaybackSession() {
 /* ---------------- Boot ---------------- */
 async function showAppVersion() {
   const v = await getVersion()
+  currentAppVersion = normalizeVersion(v)
   const settingsEl = document.getElementById("settingsVersion")
   if (settingsEl) settingsEl.textContent = "Bookstory v" + v
+  renderUpdateSection(false)
 }
 
 async function boot() {
-
   applySettings();
 
   const audio = el<HTMLAudioElement>("player")
@@ -2749,6 +3086,7 @@ async function boot() {
   show(el("miniPlayer"), false);
 
   showAppVersion()
+  void checkForUpdates()
 }
 
 window.addEventListener("beforeunload", () => {
