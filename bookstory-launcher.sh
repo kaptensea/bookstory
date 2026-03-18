@@ -22,10 +22,10 @@ fi
 SESSION_TYPE="${XDG_SESSION_TYPE:-}"
 
 if [[ "$SESSION_TYPE" == "wayland" ]]; then
-    if command -v nvidia-smi &> /dev/null || lspci 2>/dev/null | grep -qi nvidia; then
-        export WEBKIT_DISABLE_COMPOSITING_MODE=1
-        export GDK_BACKEND=x11
-    fi
+    # Disable GPU compositing on all Wayland sessions to prevent Mesa/GBM/Gallium
+    # crashes in WebKitWebProcess (affects AMD, Intel, and NVIDIA GPUs).
+    export WEBKIT_DISABLE_COMPOSITING_MODE=1
+    export GDK_BACKEND=x11
 fi
 
 # Execute the actual binary with all arguments
