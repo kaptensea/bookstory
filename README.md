@@ -37,6 +37,7 @@
 
 - **Sort List** sort you list in detailview
 - **Wayland or Wayland+NVIDIA** auto detect if on Wayland or Wayland+NVIDIA and auto disable gpu rendering and start in x11
+- **Search bar** - search for audiobooks or podcasts episodes
 
 ## Bug Reports & Feedback
 
@@ -59,6 +60,7 @@ Feature requests and general feedback are welcome too — just open an issue and
 - If on Wayland + NVIDIA, run `WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 bookstory` Investigate how to integrate this.
 - AppImage bundling can fail on some newer Linux toolchains due to `strip`/`RELR` compatibility in linuxdeploy.
 - `.deb` and `.rpm` packaging are supported and currently the recommended Linux release artifacts.
+- `WebkitGTK` often crashes. Need to replace for QtWebEngine or CEF, but then I need to rebuild the app with Electron instead of Tauri
 
 ## Metadata Fallbacks
 
