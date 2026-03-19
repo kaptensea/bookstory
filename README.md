@@ -51,6 +51,7 @@ Feature requests and general feedback are welcome too — just open an issue and
 
 ## Known Limitations
 
+- If on Wayland + NVIDIA, run `WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 bookstory` Investigate how to integrate this.
 - AppImage bundling can fail on some newer Linux toolchains due to `strip`/`RELR` compatibility in linuxdeploy.
 - `.deb` and `.rpm` packaging are supported and currently the recommended Linux release artifacts.
 
