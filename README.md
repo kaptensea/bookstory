@@ -11,12 +11,12 @@
 
 ---
 
-<details>
-  <summary>
-    <img src="src/assets/home.png" width="600"/>
-  </summary>
-  <img src="src/assets/home.png" width="100%"/>
-</details>
+<p align="center">
+  <a href="src/assets/home.png">
+    <img src="src/assets/home.png" width="600">
+  </a>
+</p>
+
 
 
 ## Features
