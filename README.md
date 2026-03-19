@@ -11,6 +11,10 @@
 
 ---
 
+<p align="center">
+  <img src="src/assets/home.png" width="600"/>
+</p>
+
 ## Features
 
 - **Continue Listening** shelf with real-time progress bars synced from your server
