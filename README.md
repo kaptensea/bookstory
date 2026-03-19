@@ -36,7 +36,7 @@
 ## Upcoming Features
 
 - **Sort List** sort you list in detailview
-- **Wayland or Wayland+NVIDIA** auto detect if on Wayland or Wayland+NVIDIA and disable gpu rendering and start in x11
+- **Wayland or Wayland+NVIDIA** auto detect if on Wayland or Wayland+NVIDIA and auto disable gpu rendering and start in x11
 
 ## Bug Reports & Feedback
 
