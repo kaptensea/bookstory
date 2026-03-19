@@ -33,6 +33,11 @@
 - **Custom window controls** and native desktop feel
 - **Cover artwork** and metadata display throughout
 
+## Upcoming Features
+
+- **Sort List** sort you list in detailview
+- **Wayland or Wayland+NVIDIA** auto detect if on Wayland or Wayland+NVIDIA and disable gpu rendering and start in x11
+
 ## Bug Reports & Feedback
 
 Found a bug? Missing a feature? Want something removed or changed?
