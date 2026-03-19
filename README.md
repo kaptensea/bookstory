@@ -12,10 +12,9 @@
 ---
 
 <p align="center">
-  <a href="src/assets/home.png">
-    <img src="src/assets/home.png" width="600">
-  </a>
+  <img src="src/assets/home.png" width="600"/>
 </p>
+
 
 
 
