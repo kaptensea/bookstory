@@ -11,9 +11,13 @@
 
 ---
 
-<p align="center">
-  <img src="src/assets/home.png" width="600"/>
-</p>
+<details>
+  <summary>
+    <img src="src/assets/home.png" width="600"/>
+  </summary>
+  <img src="src/assets/home.png" width="100%"/>
+</details>
+
 
 ## Features
 
