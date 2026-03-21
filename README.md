@@ -3,10 +3,14 @@
   <h1>Bookstory</h1>
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
-  ![Version](https://img.shields.io/badge/version-1.1.3-blue)
+  ![Version](https://img.shields.io/badge/version-1.2.0-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
   ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
   ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8D8)
+  <br />
+  <a href="https://github.com/features/copilot" target="_blank">
+    <img src="https://img.shields.io/badge/Built%20with-GitHub%20Copilot-4B32C3?logo=github" alt="Built with GitHub Copilot" />
+  </a>
 </div>
 
 ---
@@ -14,9 +18,6 @@
 <p align="center">
   <img src="src/assets/home.png" width="600"/>
 </p>
-
-
-
 
 ## Features
 
@@ -36,12 +37,6 @@
 - **Custom window controls** and native desktop feel
 - **Cover artwork** and metadata display throughout
 
-## Upcoming Features
-
-- **Sort List** sort you list in detailview
-- **Wayland or Wayland+NVIDIA** auto detect if on Wayland or Wayland+NVIDIA and auto disable gpu rendering and start in x11
-- **Search bar** - search for audiobooks or podcasts episodes
-
 ## Bug Reports & Feedback
 
 Found a bug? Missing a feature? Want something removed or changed?
@@ -60,10 +55,8 @@ Feature requests and general feedback are welcome too — just open an issue and
 
 ## Known Limitations
 
-- If on Wayland + NVIDIA, run `WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 bookstory` Investigate how to integrate this.
 - AppImage bundling can fail on some newer Linux toolchains due to `strip`/`RELR` compatibility in linuxdeploy.
 - `.deb` and `.rpm` packaging are supported and currently the recommended Linux release artifacts.
-- `WebkitGTK` often crashes. No clear solution, use x11 and disable gpu rendering makes it a little safer
 
 ## Metadata Fallbacks
 
