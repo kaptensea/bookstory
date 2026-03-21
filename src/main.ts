@@ -1,3 +1,182 @@
+// --- Global Search ---
+let allLibraryItems: any[] = [];
+let allLibraries: any[] = [];
+let searchResults: any[] = [];
+let searchDropdown: HTMLElement | null = null;
+
+async function fetchAllLibrariesAndItems() {
+  const { serverUrl, username } = getSaved();
+  const libs = await invoke<any>("abs_get_libraries", { serverUrl, username });
+  const libsArr: any[] = Array.isArray(libs) ? libs : (libs?.libraries ?? []);
+  allLibraries = libsArr;
+  let items: any[] = [];
+  for (const lib of libsArr) {
+    try {
+      const libItems = await invoke<any>("abs_get_library_items", { serverUrl, username, libraryId: lib.id });
+      const arr = libItems?.items ?? libItems?.results ?? libItems ?? [];
+      for (const item of arr) {
+        items.push({ ...item, __library: lib });
+      }
+    } catch (e) { /* skip failed libs */ }
+  }
+  allLibraryItems = items;
+}
+
+function filterSearchItems(query: string) {
+  if (!query || !allLibraryItems.length) return [];
+  const q = query.trim().toLowerCase();
+  return allLibraryItems.filter(item => {
+    const title = item?.media?.metadata?.title?.toLowerCase?.() || "";
+    const author = item?.media?.metadata?.authorName?.toLowerCase?.() || "";
+    const isPodcast = Array.isArray(item?.media?.episodes);
+    const podcastName = isPodcast ? title : "";
+    return (
+      title.includes(q) ||
+      author.includes(q) ||
+      (isPodcast && podcastName.includes(q))
+    );
+  });
+}
+
+// Enkel cache för cover-url:er per item-id
+const coverUrlCache: Record<string, string> = {};
+
+async function renderSearchDropdown(results: any[], query: string) {
+  const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
+  if (!searchDropdown) {
+    searchDropdown = document.createElement("div");
+    searchDropdown.id = "searchDropdown";
+    searchDropdown.style.position = "fixed";
+    searchDropdown.style.zIndex = "1000";
+    searchDropdown.style.background = "#222";
+    searchDropdown.style.border = "1px solid #444";
+    searchDropdown.style.borderRadius = "8px";
+    searchDropdown.style.boxShadow = "0 2px 8px #0008";
+    searchDropdown.style.maxHeight = "340px";
+    searchDropdown.style.overflowY = "auto";
+    searchDropdown.style.padding = "4px 0";
+    document.body.appendChild(searchDropdown);
+  }
+  // Positionera exakt under och lika bred som sökrutan, oavsett layout
+  if (searchInput && searchDropdown) {
+    const inputRect = searchInput.getBoundingClientRect();
+    searchDropdown.style.left = inputRect.left + "px";
+    searchDropdown.style.top = (inputRect.top + inputRect.height) + "px";
+    searchDropdown.style.width = inputRect.width + "px";
+    searchDropdown.style.right = "auto";
+  }
+  searchDropdown.innerHTML = "";
+  if (!results.length && query) {
+    const noRes = document.createElement("div");
+    noRes.textContent = "No results";
+    noRes.style.padding = "12px 18px";
+    noRes.style.color = "#aaa";
+    searchDropdown.appendChild(noRes);
+    return;
+  }
+  const { serverUrl, username } = getSaved();
+  for (const item of results.slice(0, 15)) {
+    let type = "Book";
+    if (Array.isArray(item?.media?.episodes) && item?.media?.episodes.length > 0) {
+      type = "Podcast";
+    }
+    const title = item?.media?.metadata?.title || "";
+    const author = item?.media?.metadata?.authorName || "";
+    const row = document.createElement("div");
+    row.className = "search-result-row";
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.padding = "6px 12px";
+    row.style.cursor = "pointer";
+    row.style.gap = "12px";
+    row.onmouseenter = () => row.style.background = "#333";
+    row.onmouseleave = () => row.style.background = "";
+    row.onclick = () => {
+      hideSearchDropdown();
+      showItemDetail(item.id);
+    };
+    const img = document.createElement("img");
+    img.alt = "cover";
+    img.style.width = "38px";
+    img.style.height = "38px";
+    img.style.objectFit = "cover";
+    img.style.borderRadius = "6px";
+    img.style.background = "#222";
+    // Kolla cache först
+    if (coverUrlCache[item.id]) {
+      img.src = coverUrlCache[item.id];
+    } else {
+      invoke<string>("abs_get_cover_url", { serverUrl, username, itemId: item.id })
+        .then(url => {
+          const resolved = url && url.trim() ? url : coverMissingUrl;
+          coverUrlCache[item.id] = resolved;
+          img.src = resolved;
+        })
+        .catch(() => {
+          coverUrlCache[item.id] = coverMissingUrl;
+          img.src = coverMissingUrl;
+        });
+    }
+    const meta = document.createElement("div");
+    meta.style.display = "flex";
+    meta.style.flexDirection = "column";
+    meta.style.gap = "2px";
+    const t = document.createElement("span");
+    t.textContent = title;
+    t.style.fontWeight = "bold";
+    t.style.color = "#fff";
+    const a = document.createElement("span");
+    a.textContent = author;
+    a.style.fontSize = "13px";
+    a.style.color = "#aaa";
+    const ty = document.createElement("span");
+    ty.textContent = type;
+    ty.style.fontSize = "12px";
+    ty.style.color = type === "Podcast" ? "#6cf" : "#fc6";
+    meta.appendChild(t);
+    if (author) meta.appendChild(a);
+    meta.appendChild(ty);
+    row.appendChild(img);
+    row.appendChild(meta);
+    searchDropdown.appendChild(row);
+  }
+}
+
+function hideSearchDropdown() {
+  if (searchDropdown) {
+    searchDropdown.remove();
+    searchDropdown = null;
+  }
+}
+
+// Wire up search input
+window.addEventListener("DOMContentLoaded", () => {
+  const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
+  if (!searchInput) return;
+  let lastQuery = "";
+  let fetchStarted = false;
+  searchInput.addEventListener("input", async () => {
+    const val = searchInput.value.trim();
+    if (!fetchStarted) {
+      fetchStarted = true;
+      await fetchAllLibrariesAndItems();
+    }
+    if (!val) {
+      hideSearchDropdown();
+      return;
+    }
+    if (val === lastQuery) return;
+    lastQuery = val;
+    searchResults = filterSearchItems(val);
+    renderSearchDropdown(searchResults, val);
+  });
+  // Hide dropdown on outside click
+  document.addEventListener("click", (e) => {
+    if (searchDropdown && !searchInput.contains(e.target as Node) && !searchDropdown.contains(e.target as Node)) {
+      hideSearchDropdown();
+    }
+  });
+});
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
