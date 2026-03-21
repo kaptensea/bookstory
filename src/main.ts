@@ -129,13 +129,9 @@ async function renderSearchDropdown(results: any[], query: string) {
     a.textContent = author;
     a.style.fontSize = "13px";
     a.style.color = "#aaa";
-    const ty = document.createElement("span");
-    ty.textContent = type;
-    ty.style.fontSize = "12px";
-    ty.style.color = type === "Podcast" ? "#6cf" : "#fc6";
+    // Ta bort typ-raden (Book/Podcast)
     meta.appendChild(t);
     if (author) meta.appendChild(a);
-    meta.appendChild(ty);
     row.appendChild(img);
     row.appendChild(meta);
     searchDropdown.appendChild(row);
@@ -153,6 +149,8 @@ function hideSearchDropdown() {
 window.addEventListener("DOMContentLoaded", () => {
   const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
   if (!searchInput) return;
+  // Sätt placeholder enligt valt språk
+  searchInput.placeholder = tr("search.placeholder");
   let lastQuery = "";
   let fetchStarted = false;
   searchInput.addEventListener("input", async () => {
@@ -223,6 +221,7 @@ const coverMissingUrl = new URL("./assets/covermissing.svg", import.meta.url).hr
 
 const I18N: Record<AppLanguage, Record<string, string>> = {
   en: {
+    "search.placeholder": "Search...",
     "login.subtitle": "Connect to your Audiobookshelf server",
     "login.server": "Server address",
     "login.username": "Username",
@@ -287,6 +286,7 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "label.book.plural": "books",
   },
   sv: {
+    "search.placeholder": "Sök...",
     "login.subtitle": "Anslut till din Audiobookshelf-server",
     "login.server": "Serveradress",
     "login.username": "Anv\u00e4ndarnamn",
@@ -351,6 +351,7 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "label.book.plural": "b\u00f6cker",
   },
   de: {
+    "search.placeholder": "Suchen...",
     "login.subtitle": "Mit deinem Audiobookshelf-Server verbinden",
     "login.server": "Serveradresse",
     "login.username": "Benutzername",
@@ -1280,6 +1281,10 @@ document.addEventListener("click", async (e) => {
 
       saveSettings(next);
       setMsg("settingsMsg", tr("settings.saved"), "ok");
+
+      // Uppdatera placeholdern i sökrutan om den finns
+      const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
+      if (searchInput) searchInput.placeholder = I18N[next.language]["search.placeholder"] || "Search...";
 
       if (currentLibraryItems.length) {
         void renderLibraryGrid();
