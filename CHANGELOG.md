@@ -1,3 +1,12 @@
+# 1.2.0 - 2026-03-21
+
+### Added
+- Global search bar: Search all books and podcasts with instant dropdown results and cover images.
+
+### Changed
+- Adjusted mini player opacity for better fallback when blur is disabled (e.g. on NVIDIA).
+- Minor UI/UX improvements and bugfixes.
+
 # Changelog
 
 All notable changes to this project are documented in this file.

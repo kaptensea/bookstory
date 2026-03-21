@@ -27,6 +27,7 @@
 
 ## Features
 
+- **Global search bar** — search all books and podcasts with instant dropdown results and cover images
 - **Continue Listening** shelf with real-time progress bars synced from your server
 - **Library browser** — browse all your audiobooks and podcasts
 - **Item detail view** with chapter list and chapter-level playback
