@@ -1,14 +1,12 @@
 // --- Global Search ---
 let allLibraryItems: any[] = [];
 let searchResults: any[] = [];
-let allLibraries: any[] = [];
 let searchDropdown: HTMLElement | null = null;
 
 async function fetchAllLibrariesAndItems() {
   const { serverUrl, username } = getSaved();
   const libs = await invoke<any>("abs_get_libraries", { serverUrl, username });
   const libsArr: any[] = Array.isArray(libs) ? libs : (libs?.libraries ?? []);
-  allLibraries = libsArr;
   let items: any[] = [];
   for (const lib of libsArr) {
     try {
