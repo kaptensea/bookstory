@@ -93,6 +93,9 @@ async function renderSearchDropdown(results: any[], query: string) {
     row.onmouseleave = () => row.style.background = "";
     row.onclick = () => {
       hideSearchDropdown();
+      // Töm sökrutan
+      const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
+      if (searchInput) searchInput.value = "";
       showItemDetail(item.id);
     };
     const img = document.createElement("img");
