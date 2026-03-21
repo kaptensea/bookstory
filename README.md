@@ -3,10 +3,16 @@
   <h1>Bookstory</h1>
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
-  ![Version](https://img.shields.io/badge/version-1.2.0-blue)
-  ![License](https://img.shields.io/badge/license-MIT-green)
-  ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)
-  ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8D8)
+  <a href="https://github.com/kaptensea/bookstory/releases" target="_blank">
+    <img src="https://img.shields.io/badge/version-1.2.0-blue" alt="Version" />
+  </a>
+  <a href="https://opensource.org/licenses/MIT" target="_blank">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
+  </a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey" alt="Platform" />
+  <a href="https://tauri.app/" target="_blank">
+    <img src="https://img.shields.io/badge/built%20with-Tauri%202-24C8D8" alt="Built with Tauri" />
+  </a>
   <br />
   <a href="https://github.com/features/copilot" target="_blank">
     <img src="https://img.shields.io/badge/Built%20with-GitHub%20Copilot-4B32C3?logo=github" alt="Built with GitHub Copilot" />
