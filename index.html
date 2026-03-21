@@ -41,6 +41,7 @@
     <!-- HOME VIEW -->
     <div id="homeView" style="display:none;">
 
+
       <!-- TOP BAR (full width) -->
       <div class="topbar" data-tauri-drag-region>
         <h1 id="topbarTitle">Bookstory</h1>
@@ -57,28 +58,35 @@
       </div>
 
       <!-- CONTENT ROW -->
-      <div class="contentRow">
+      <!-- (outer duplicate removed, only one sidebar/mainContent remains) -->
 
+      <!-- CONTENT ROW -->
+      <!-- (outer duplicate removed, only one sidebar/mainContent remains) -->
+
+      <!-- CONTENT ROW -->
+      <div class="contentRow">
         <!-- SIDEBAR -->
         <aside id="sidebar">
           <h3 id="sidebarLibraryLabel">Library</h3>
           <select id="librarySelect" size="8"></select>
-
           <h3 id="sidebarSortLabel">Sort</h3>
           <select id="sortSelect">
             <option value="recent">Recently added</option>
             <option value="az">A → Z</option>
             <option value="za">Z → A</option>
           </select>
-
           <button id="settingsBtn" style="margin-top:12px;">Settings</button>
           <button id="logoutBtn" style="margin-top:12px;">Log out</button>
           <div id="whoami" class="sidebar-whoami"></div>
-
         </aside>
-
         <!-- MAIN CONTENT -->
         <main id="mainContent">
+          <!-- SEARCH BAR (in main content, right aligned) -->
+          <div id="searchBarWrap" class="search-bar-wrap" style="width:100%; display:flex; justify-content:flex-end; align-items:flex-start; position:relative; margin-bottom:18px;">
+            <div style="min-width:260px; max-width:340px; width:100%; margin:0 18px 0 0; position:relative;">
+              <input id="searchInput" class="search-input" type="text" placeholder="Search..." autocomplete="off" />
+            </div>
+          </div>
           <div id="updateBanner" class="update-banner" style="display:none;">
             <div class="update-banner-copy">
               <div id="updateBannerTitle" class="update-banner-title"></div>
@@ -89,7 +97,6 @@
               <button id="updateBannerDismissBtn" type="button" aria-label="Dismiss update notice">Dismiss</button>
             </div>
           </div>
-
           <section id="continueSection">
             <h2 id="continueHeading">Continue Listening</h2>
             <div id="continueList" class="list"></div>

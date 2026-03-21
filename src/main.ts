@@ -2225,8 +2225,9 @@ async function renderLibraryGrid() {
     markPlayedBtn.onclick = async (ev) => {
       ev.stopPropagation();
       await invoke("abs_mark_played", { serverUrl, username, itemId, episodeId: null });
-      menu.style.display = "none";
       setLibraryItemDoneState(String(itemId), true);
+      resetBtn.style.display = "";
+      menu.style.display = "none";
       scheduleContinueRefresh(0);
     };
 
@@ -2235,6 +2236,10 @@ async function renderLibraryGrid() {
       await invoke("abs_mark_unplayed", { serverUrl, username, itemId, episodeId: null });
       menu.style.display = "none";
       setLibraryItemDoneState(String(itemId), false);
+      // Döljer bocken och återställ-knappen, visar markera som spelad
+      doneBadge.style.display = "none";
+      resetBtn.style.display = "none";
+      markPlayedBtn.style.display = "";
       scheduleContinueRefresh(0);
     };
 
