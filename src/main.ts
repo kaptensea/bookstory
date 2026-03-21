@@ -1,7 +1,7 @@
 // --- Global Search ---
 let allLibraryItems: any[] = [];
-let allLibraries: any[] = [];
 let searchResults: any[] = [];
+let allLibraries: any[] = [];
 let searchDropdown: HTMLElement | null = null;
 
 async function fetchAllLibrariesAndItems() {
@@ -76,10 +76,6 @@ async function renderSearchDropdown(results: any[], query: string) {
   }
   const { serverUrl, username } = getSaved();
   for (const item of results.slice(0, 15)) {
-    let type = "Book";
-    if (Array.isArray(item?.media?.episodes) && item?.media?.episodes.length > 0) {
-      type = "Podcast";
-    }
     const title = item?.media?.metadata?.title || "";
     const author = item?.media?.metadata?.authorName || "";
     const row = document.createElement("div");
