@@ -46,6 +46,8 @@ if [[ "$SESSION_TYPE" == "wayland" ]]; then
     if command -v nvidia-smi &> /dev/null || lspci 2>/dev/null | grep -qi nvidia; then
         export WEBKIT_DISABLE_COMPOSITING_MODE=1
         export GDK_BACKEND=x11
+    else
+        export GDK_BACKEND=x11
     fi
 fi
 exec /usr/libexec/bookstory-bin "$@"
@@ -101,6 +103,8 @@ SESSION_TYPE="${XDG_SESSION_TYPE:-}"
 if [[ "$SESSION_TYPE" == "wayland" ]]; then
     if command -v nvidia-smi &> /dev/null || lspci 2>/dev/null | grep -qi nvidia; then
         export WEBKIT_DISABLE_COMPOSITING_MODE=1
+        export GDK_BACKEND=x11
+    else
         export GDK_BACKEND=x11
     fi
 fi
