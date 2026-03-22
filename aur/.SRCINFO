@@ -1,0 +1,15 @@
+pkgbase = bookstory-bin
+	pkgdesc = Bookstory – Audiobook and Podcast Manager
+	pkgver = 1.2.0
+	pkgrel = 1
+	url = https://github.com/kaptensea/bookstory
+	arch = x86_64
+	license = MIT
+	depends = libappindicator-gtk3
+	depends = webkit2gtk
+	depends = gtk3
+	depends = libx11
+	source = bookstory-bin-1.2.0.deb::https://github.com/kaptensea/bookstory/releases/download/v1.2.0/bookstory_1.2.0_amd64.deb
+	sha256sums = SKIP
+
+pkgname = bookstory-bin
