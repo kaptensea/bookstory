@@ -22,8 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.SRCINFO
-PKGBULD
+
 
 # Tauri / Rust
 src-tauri/target
@@ -34,7 +33,6 @@ Thumbs.db
 
 # TypeScript build cache
 *.tsbuildinfo
-aur/
 pkg/
 *.deb
 *.pkg.tar.zst
