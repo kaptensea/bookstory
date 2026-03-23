@@ -2279,8 +2279,33 @@ async function renderLibraryGrid() {
 
   const sort = (el<HTMLSelectElement>("sortSelect")?.value ?? "recent");
   const list = currentLibraryItems.slice();
-  if (sort === "az") list.sort((a,b) => (a?.media?.metadata?.title ?? "").localeCompare(b?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
-  if (sort === "za") list.sort((a,b) => (b?.media?.metadata?.title ?? "").localeCompare(a?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
+  if (sort === "az") {
+    list.sort((a,b) => (a?.media?.metadata?.title ?? "").localeCompare(b?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
+  } else if (sort === "za") {
+    list.sort((a,b) => (b?.media?.metadata?.title ?? "").localeCompare(a?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
+  } else if (sort === "recent") {
+    function getAddedDate(obj: any): number {
+      // Prova flera vanliga platser för datumfältet
+      const candidates = [
+        obj?.addedAt,
+        obj?.createdAt,
+        obj?.media?.addedAt,
+        obj?.media?.createdAt,
+        obj?.media?.metadata?.addedAt,
+        obj?.media?.metadata?.createdAt
+      ];
+      for (const val of candidates) {
+        if (!val) continue;
+        if (typeof val === "number" && isFinite(val)) return val;
+        if (typeof val === "string") {
+          const parsed = Date.parse(val);
+          if (!isNaN(parsed)) return parsed;
+        }
+      }
+      return 0;
+    }
+    list.sort((a, b) => getAddedDate(b) - getAddedDate(a));
+  }
 
   const { serverUrl, username } = getSaved();
   const isPodcastLibrary = String(currentLibraryMediaType || "").toLowerCase() === "podcast";
