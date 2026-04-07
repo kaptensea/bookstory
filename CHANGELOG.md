@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased - 2026-04-07
+## [1.3.0] - 2026-04-07
 
 ### Added
 - Linux runtime compatibility fallback in app startup: on Wayland sessions, Bookstory relaunches with `GDK_BACKEND=x11` automatically.
