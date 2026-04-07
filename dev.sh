@@ -3,6 +3,8 @@
 # Bookstory Development Server with Smart Platform Detection
 # Auto-detects Wayland + NVIDIA and configures the environment
 
+export BOOKSTORY_LINUX_COMPAT_APPLIED=1
+
 SESSION_TYPE="${XDG_SESSION_TYPE:-}"
 
 

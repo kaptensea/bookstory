@@ -4,7 +4,7 @@
 On Linux systems with Wayland session + NVIDIA GPU, the Bookstory app fails to start with a GTK initialization error. This requires setting environment variables before the app launches.
 
 ## Solution
-We've implemented an integrated approach where the launcher is automatically built into all packages.
+We've implemented an integrated approach where Bookstory detects this at Linux startup and relaunches itself with the correct environment before Tauri/WebKit initializes.
 
 ### For Development (`npm run tauri:dev`)
 ```bash
@@ -26,29 +26,29 @@ npm run tauri:build
 
 This single command:
 1. Builds the app with `npm run tauri build`
-2. Automatically integrates the launcher into all packages (.deb, .rpm, .appimage)
+2. Produces the normal Tauri packages (.deb, .rpm, .appimage)
 3. Creates single, self-contained installer files
 
 **Result**: End users get `.deb`/`.rpm`/`.appimage` files that "just work" without any manual setup.
 
 When users install and launch the app:
-- The launcher automatically detects Wayland + NVIDIA
+- Bookstory automatically detects Wayland + NVIDIA
 - Sets required env vars at runtime
-- Launches the app with correct settings
+- Relaunches itself with correct settings before GTK/WebKit startup
 
 ## How It Works (Technical)
 
 ### Development
 `npm run tauri:dev` → `dev.sh` (detects & sets env) → `npm run tauri dev`
 
-### Installers (Automated)
-The build script:
-1. Builds the binary normally
-2. For deb/rpm: moves the binary to `/usr/libexec/bookstory-bin` and creates a wrapper script at `/usr/bin/bookstory`
-3. Updates `.desktop` files to call the wrapper instead of the binary
-4. Repackages everything into a single installer file
+### Packaged Builds
+The Linux binary itself:
+1. Checks whether it is starting on Wayland
+2. Detects whether NVIDIA is present using `nvidia-smi` or `lspci`
+3. Relaunches itself with `GDK_BACKEND=x11`
+4. Adds `WEBKIT_DISABLE_COMPOSITING_MODE=1` on Wayland + NVIDIA
 
-When users launch the app, the wrapper script runs first, detects the environment, sets env vars, then executes the actual binary.
+Because this happens inside the shipped binary, the same behavior works for `.deb`, `.rpm`, `.AppImage`, GitHub release builds, and manual launches.
 
 ## Usage
 
@@ -76,5 +76,6 @@ npm run tauri:dev  # Works normally, detection finds no match
 
 ## Files
 - `dev.sh` - Development launcher (called by `npm run tauri:dev`)
-- `bookstory-launcher.sh` - Launcher logic (embedded in packages by build script)
-- `build-and-bundle.sh` - Automated build and package integration
+- `bookstory-launcher.sh` - Optional shell launcher with the same compatibility env setup
+- `build-and-bundle.sh` - Build entrypoint for packaged releases
+- `src-tauri/src/main.rs` - Built-in Linux compatibility relaunch before app startup

@@ -21,10 +21,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 axum = "0.7"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util"] }
 
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
 rand = "0.8"
+futures-util = "0.3"
 
 # OS keyring support (Linux Secret Service / macOS Keychain / Windows Credential Manager)
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

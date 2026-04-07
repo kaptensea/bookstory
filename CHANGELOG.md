@@ -1,4 +1,46 @@
-# 1.2.0 - 2026-03-21
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+## Unreleased - 2026-04-07
+
+### Added
+- Linux runtime compatibility fallback in app startup: on Wayland sessions, Bookstory relaunches with `GDK_BACKEND=x11` automatically.
+- Additional NVIDIA-specific Wayland safeguard: when NVIDIA GPU is detected, app startup also sets `WEBKIT_DISABLE_COMPOSITING_MODE=1`.
+- Relaunch guard environment handling to prevent startup loops when compatibility relaunch is active.
+- New sort mode: `Oldest added` in sidebar sort select and settings default sort.
+- Sidebar section heading for menu actions (Settings / Log out / account info), localized for English, Swedish, and German.
+- Offline listening support with local audio playback routing for downloaded items.
+- Per-item offline actions in both library cover menu and detail view: download/remove offline files.
+- Offline progress queue: progress updates are queued while offline and synced when online.
+- Offline download progress events and UI progress badges for active downloads.
+- New settings for offline/audio behavior:
+	- default volume,
+	- max offline storage in MB (`0` = unlimited),
+	- auto-download when playback starts,
+	- auto-remove offline files when a book is finished.
+
+### Changed
+- Linux compatibility handling moved from external launcher/package post-processing to robust in-app startup logic so packaged installers behave like development runs.
+- Build and bundle flow simplified to standard Tauri packaging path (no brittle package surgery).
+- README and platform docs aligned with runtime compatibility architecture.
+- UI polish pass across controls:
+	- unified premium green style for primary buttons and key playback controls,
+	- Now Playing controls aligned with mini-player style language,
+	- consistent green focus/hover frame tone for search, sort, library list, and cover hover states.
+- Sort dropdown affordance improved with clearer arrow and stronger visual clarity.
+- Settings view expanded with offline management tools and storage usage summary.
+- Playback now prefers offline local files when available before falling back to network streaming.
+- Automatic storage enforcement removes oldest offline items when configured max storage is exceeded.
+
+### Fixed
+- Cover/item three-dot action menu now opens correctly on first click (no double-click behavior).
+- Popup menus now close reliably on outside click and coordinate open/close state consistently.
+- Mini-player idle title (`Nothing playing`) now uses runtime i18n and updates correctly with selected language.
+- Sorting/settings wiring now consistently supports `recent`, `oldest`, `az`, and `za` across load/save/render and translated option labels.
+- Removed an unintended Wi-Fi-only download option path; only requested settings (1, 2, 4) are active.
+
+## 1.2.0 - 2026-03-21
 
 ### Added
 - Global search bar: Search all books and podcasts with instant dropdown results and cover images.
@@ -6,10 +48,6 @@
 ### Changed
 - Adjusted mini player opacity for better fallback when blur is disabled (e.g. on NVIDIA).
 - Minor UI/UX improvements and bugfixes.
-
-# Changelog
-
-All notable changes to this project are documented in this file.
 
 ## 1.1.3 - 2026-03-18
 

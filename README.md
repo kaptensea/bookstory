@@ -37,12 +37,21 @@
 - **Progress sync** — listens sessions are synced back to your Audiobookshelf server
 - **Podcast episode progress** synced using episode-aware API endpoints
 - **Mark played / unplayed** in Continue Listening, Library cards, and Podcast episode rows
-- **Settings page** for language, default sort, seek seconds, and continue-card animations
+- **Settings page** for language, default sort, default volume, seek seconds, and continue-card animations
+- **Flexible sorting** — Recently added, Oldest added, A -> Z, Z -> A (sidebar + settings default)
+- **Offline download controls** — download/remove per item from cover menu and detail view
+- **Offline cleanup controls** — remove all offline files from settings
+- **Offline storage management** — configurable max offline storage with automatic oldest-item cleanup
+- **Auto-download on playback** option for offline-first listening
+- **Auto-remove finished offline items** option (optional cleanup when a book is completed)
+- **Offline progress queue sync** — progress is queued offline and synced when online again
 - **Runtime localization** in English, Swedish, and German
+- **Linux Wayland compatibility startup** — automatic X11 fallback on Wayland and extra NVIDIA safeguards
 - **In-app update notice** with platform-aware update guidance
 - **Auto-login** — credentials stored securely in the system keyring
 - **Custom window controls** and native desktop feel
 - **Cover artwork** and metadata display throughout
+- **Refined playback/menu UX** — single-click action menus, improved dropdown clarity, and unified premium control styling
 
 ## Bug Reports & Feedback
 
@@ -69,6 +78,27 @@ Feature requests and general feedback are welcome too — just open an issue and
 
 - In chapter lists, audiobooks can show generic labels like `Track 1`, `Track 2` when no embedded title is available.
 - Podcasts can show the episode filename when no episode title metadata is available.
+
+## Offline Listening
+
+Bookstory supports per-item offline listening and automatic sync when connectivity returns.
+
+What you can do:
+- Download individual items for offline playback from the library cover menu or item detail view.
+- Remove offline files per item from the same places.
+- Remove all offline files from Settings.
+- Queue listening progress while offline and sync it to Audiobookshelf when online.
+
+Offline settings available:
+- Default volume (%).
+- Max offline storage (MB, `0` means unlimited).
+- Auto-download item when playback starts.
+- Auto-remove offline files when a book is finished.
+
+Behavior notes:
+- "Remove offline" actions are only shown for items that actually have offline files.
+- Playback prefers local offline audio when available, and falls back to online stream otherwise.
+- If max offline storage is exceeded, oldest downloaded offline items are removed automatically.
 
 ## Requirements
 
@@ -120,16 +150,17 @@ Bookstory is designed to run on Linux and Windows.
 Linux compatibility (tested and supported):
 - X11 sessions (Intel, AMD, NVIDIA)
 - Wayland sessions (Intel, AMD)
-- Wayland + NVIDIA (automatic compatibility fallback during development launcher flow)
+- Wayland + NVIDIA (automatic compatibility fallback during app startup)
 
 What this means in practice:
 - Development runs are supported via `npm run tauri:dev`.
 - Standard Tauri packaging targets are supported for distribution: `.deb`, `.rpm`, and `.AppImage`.
+- Installed builds use the same runtime compatibility logic as development runs, so end users normally do not need to set manual launch environment variables.
 
 If you are on Wayland + NVIDIA and encounter startup issues in a custom environment, test with:
 - `WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 npm run tauri dev`
 
-This project includes launcher/build logic intended to keep compatibility consistent across environments.
+This project includes startup/build logic intended to keep compatibility consistent across environments.
 
 ## Releases
 

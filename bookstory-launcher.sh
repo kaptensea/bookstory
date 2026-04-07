@@ -5,6 +5,8 @@
 #
 # Installers should create a symlink or wrapper that calls this script.
 
+export BOOKSTORY_LINUX_COMPAT_APPLIED=1
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

@@ -175,6 +175,7 @@ window.addEventListener("DOMContentLoaded", () => {
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 type Json = any;
@@ -183,7 +184,11 @@ type AppLanguage = "en" | "sv" | "de";
 
 type AppSettings = {
   language: AppLanguage;
-  defaultSort: "recent" | "az" | "za";
+  defaultSort: "recent" | "oldest" | "az" | "za";
+  defaultVolume: number;
+  maxOfflineMb: number;
+  autoDownloadOnPlay: boolean;
+  autoRemoveOfflineOnFinished: boolean;
   seekSeconds: number;
   continueAnimations: boolean;
   showAuthor: boolean;
@@ -209,6 +214,10 @@ type UpdateState = {
 const DEFAULT_SETTINGS: AppSettings = {
   language: "en",
   defaultSort: "recent",
+  defaultVolume: 100,
+  maxOfflineMb: 2048,
+  autoDownloadOnPlay: false,
+  autoRemoveOfflineOnFinished: false,
   seekSeconds: 15,
   continueAnimations: true,
   showAuthor: false,
@@ -226,15 +235,18 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "login.signIn": "Sign in",
     "sidebar.library": "Library",
     "sidebar.sort": "Sort",
+    "sidebar.menu": "Menu",
     "sidebar.settings": "Settings",
     "sidebar.logout": "Log out",
     "home.continue": "Continue Listening",
     "home.empty": "Nothing in progress yet.",
     "home.loadingLibrary": "Loading library...",
+    "mini.nothingPlaying": "Nothing playing",
     "np.buffering": "Buffering...",
     "home.signedInAs": "Signed in as {{name}}",
     "home.loggedOut": "Logged out",
     "sort.recent": "Recently added",
+    "sort.oldest": "Oldest added",
     "sort.az": "A -> Z",
     "sort.za": "Z -> A",
     "common.item": "Item",
@@ -246,12 +258,26 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "continue.markPlayedTitle": "Mark as played",
     "menu.markPlayed": "Mark as played",
     "menu.resetUnplayed": "Reset / mark as unplayed",
+    "menu.downloadOffline": "Download offline",
+    "menu.removeOffline": "Remove offline",
+    "offline.saved": "Saved for offline listening",
+    "offline.removed": "Offline files removed",
+    "offline.downloading": "Downloading",
+    "settings.offline": "Offline",
+    "settings.offlineSummary": "Offline items: {{items}} | files: {{tracks}}",
+    "settings.offlineUsage": "Used space: {{size}}",
+    "settings.clearOffline": "Remove all offline files",
+    "settings.offlineCleared": "All offline files removed",
     "settings.title": "Settings",
     "settings.language": "Language",
     "settings.lang.en": "English",
     "settings.lang.sv": "Swedish",
     "settings.lang.de": "German",
     "settings.defaultSort": "Default sort",
+    "settings.defaultVolume": "Default volume (%)",
+    "settings.maxOfflineMb": "Max offline storage (MB, 0 = unlimited)",
+    "settings.autoDownloadOnPlay": "Auto-download item when playback starts",
+    "settings.autoRemoveOfflineOnFinished": "Auto-remove offline when book finishes",
     "settings.skipSeconds": "Skip seconds (back/forward)",
     "settings.animations": "Enable Continue card animations",
     "settings.showAuthor": "Show author name on book cards",
@@ -291,15 +317,18 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "login.signIn": "Logga in",
     "sidebar.library": "Bibliotek",
     "sidebar.sort": "Sortering",
+    "sidebar.menu": "Meny",
     "sidebar.settings": "Inst\u00e4llningar",
     "sidebar.logout": "Logga ut",
     "home.continue": "Forts\u00e4tt lyssna",
     "home.empty": "Inget p\u00e5g\u00e5r just nu.",
     "home.loadingLibrary": "Laddar bibliotek...",
+    "mini.nothingPlaying": "Inget spelas",
     "np.buffering": "Buffrar...",
     "home.signedInAs": "Inloggad som {{name}}",
     "home.loggedOut": "Utloggad",
     "sort.recent": "Senast tillagt",
+    "sort.oldest": "Äldst tillagt",
     "sort.az": "A -> \u00d6",
     "sort.za": "\u00d6 -> A",
     "common.item": "Objekt",
@@ -311,12 +340,26 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "continue.markPlayedTitle": "Markera som spelad",
     "menu.markPlayed": "Markera som spelad",
     "menu.resetUnplayed": "\u00c5terst\u00e4ll / markera som ospelad",
+    "menu.downloadOffline": "Ladda ner offline",
+    "menu.removeOffline": "Ta bort offline",
+    "offline.saved": "Sparad f\u00f6r offline-lyssning",
+    "offline.removed": "Offline-filer borttagna",
+    "offline.downloading": "Laddar ner",
+    "settings.offline": "Offline",
+    "settings.offlineSummary": "Offline-objekt: {{items}} | filer: {{tracks}}",
+    "settings.offlineUsage": "Använt utrymme: {{size}}",
+    "settings.clearOffline": "Ta bort alla offline-filer",
+    "settings.offlineCleared": "Alla offline-filer borttagna",
     "settings.title": "Inst\u00e4llningar",
     "settings.language": "Spr\u00e5k",
     "settings.lang.en": "Engelska",
     "settings.lang.sv": "Svenska",
     "settings.lang.de": "Tyska",
     "settings.defaultSort": "Standardsortering",
+    "settings.defaultVolume": "Standardvolym (%)",
+    "settings.maxOfflineMb": "Max offline-lagring (MB, 0 = obegränsat)",
+    "settings.autoDownloadOnPlay": "Ladda ner automatiskt när uppspelning startar",
+    "settings.autoRemoveOfflineOnFinished": "Ta bort offline automatiskt när boken är klar",
     "settings.skipSeconds": "Hoppa sekunder (bak/fram)",
     "settings.animations": "Aktivera animationer i Forts\u00e4tt lyssna",
     "settings.showAuthor": "Visa f\u00f6rfattare p\u00e5 bokskort",
@@ -356,15 +399,18 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "login.signIn": "Anmelden",
     "sidebar.library": "Bibliothek",
     "sidebar.sort": "Sortierung",
+    "sidebar.menu": "Men\u00fc",
     "sidebar.settings": "Einstellungen",
     "sidebar.logout": "Abmelden",
     "home.continue": "Weiterh\u00f6ren",
     "home.empty": "Noch nichts in Wiedergabe.",
     "home.loadingLibrary": "Bibliothek wird geladen...",
+    "mini.nothingPlaying": "Nichts wird abgespielt",
     "np.buffering": "Puffert...",
     "home.signedInAs": "Angemeldet als {{name}}",
     "home.loggedOut": "Abgemeldet",
     "sort.recent": "Zuletzt hinzugef\u00fcgt",
+    "sort.oldest": "Älteste zuerst",
     "sort.az": "A -> Z",
     "sort.za": "Z -> A",
     "common.item": "Element",
@@ -376,12 +422,26 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "continue.markPlayedTitle": "Als abgespielt markieren",
     "menu.markPlayed": "Als abgespielt markieren",
     "menu.resetUnplayed": "Zur\u00fccksetzen / als nicht abgespielt markieren",
+    "menu.downloadOffline": "Offline herunterladen",
+    "menu.removeOffline": "Offline entfernen",
+    "offline.saved": "F\u00fcr Offline-Wiedergabe gespeichert",
+    "offline.removed": "Offline-Dateien entfernt",
+    "offline.downloading": "Wird heruntergeladen",
+    "settings.offline": "Offline",
+    "settings.offlineSummary": "Offline-Elemente: {{items}} | Dateien: {{tracks}}",
+    "settings.offlineUsage": "Verwendeter Speicher: {{size}}",
+    "settings.clearOffline": "Alle Offline-Dateien entfernen",
+    "settings.offlineCleared": "Alle Offline-Dateien entfernt",
     "settings.title": "Einstellungen",
     "settings.language": "Sprache",
     "settings.lang.en": "Englisch",
     "settings.lang.sv": "Schwedisch",
     "settings.lang.de": "Deutsch",
     "settings.defaultSort": "Standardsortierung",
+    "settings.defaultVolume": "Standardlautstärke (%)",
+    "settings.maxOfflineMb": "Max. Offline-Speicher (MB, 0 = unbegrenzt)",
+    "settings.autoDownloadOnPlay": "Element automatisch herunterladen, wenn Wiedergabe startet",
+    "settings.autoRemoveOfflineOnFinished": "Offline automatisch entfernen, wenn Buch fertig ist",
     "settings.skipSeconds": "Sekunden springen (zur\u00fcck/vor)",
     "settings.animations": "Animationen f\u00fcr Weiterh\u00f6ren-Karten aktivieren",
     "settings.showAuthor": "Autor auf Buchkarten anzeigen",
@@ -467,6 +527,14 @@ let currentAppVersion = "";
 let lastUpdateState: UpdateState | null = null;
 let updateCheckPromise: Promise<UpdateState> | null = null;
 let updateBannerDismissed = false;
+const offlineAvailableByItemId = new Map<string, boolean>();
+const offlineDownloadProgressByItemId = new Map<string, { percent: number; status: "downloading" | "ready" }>();
+
+type OfflineStats = {
+  itemCount: number;
+  trackCount: number;
+  totalBytes?: number;
+};
 
 const preloadAudio = new Audio()
 preloadAudio.preload = "auto"
@@ -484,7 +552,14 @@ function loadSettings(): AppSettings {
     const parsed = JSON.parse(raw);
     return {
       language: normalizeLanguage(parsed?.language),
-      defaultSort: parsed?.defaultSort === "az" || parsed?.defaultSort === "za" ? parsed.defaultSort : "recent",
+      defaultSort:
+        parsed?.defaultSort === "oldest" || parsed?.defaultSort === "az" || parsed?.defaultSort === "za"
+          ? parsed.defaultSort
+          : "recent",
+      defaultVolume: Math.max(0, Math.min(100, Number(parsed?.defaultVolume) || DEFAULT_SETTINGS.defaultVolume)),
+      maxOfflineMb: Math.max(0, Math.min(1024 * 1024, Number(parsed?.maxOfflineMb) || DEFAULT_SETTINGS.maxOfflineMb)),
+      autoDownloadOnPlay: parsed?.autoDownloadOnPlay === true,
+      autoRemoveOfflineOnFinished: parsed?.autoRemoveOfflineOnFinished === true,
       seekSeconds: Math.max(5, Math.min(120, Number(parsed?.seekSeconds) || DEFAULT_SETTINGS.seekSeconds)),
       continueAnimations: parsed?.continueAnimations !== false,
       showAuthor: parsed?.showAuthor === true,
@@ -504,6 +579,12 @@ function applySettings() {
   const sort = document.getElementById("sortSelect") as HTMLSelectElement | null;
   if (sort) sort.value = appSettings.defaultSort;
 
+  const audio = document.getElementById("player") as HTMLAudioElement | null;
+  const vol = Math.max(0, Math.min(1, appSettings.defaultVolume / 100));
+  if (audio) audio.volume = vol;
+  const miniVolume = document.getElementById("miniVolume") as HTMLInputElement | null;
+  if (miniVolume) miniVolume.value = String(vol);
+
   document.body.classList.toggle("continue-anim-off", !appSettings.continueAnimations);
   applyTranslations();
 }
@@ -519,16 +600,23 @@ function applyTranslations() {
   setTextIfExists("topbarTitle", "Bookstory");
   setTextIfExists("sidebarLibraryLabel", tr("sidebar.library"));
   setTextIfExists("sidebarSortLabel", tr("sidebar.sort"));
+  setTextIfExists("sidebarMenuLabel", tr("sidebar.menu"));
   setTextIfExists("settingsBtn", tr("sidebar.settings"));
   setTextIfExists("logoutBtn", tr("sidebar.logout"));
   setTextIfExists("continueHeading", tr("home.continue"));
   setTextIfExists("continueEmpty", tr("home.empty"));
   setTextIfExists("npLoadingText", tr("np.buffering"));
 
+  const miniTitleEl = document.getElementById("miniTitle");
+  if (miniTitleEl && !(document.getElementById("player") as HTMLAudioElement | null)?.src) {
+    miniTitleEl.textContent = tr("mini.nothingPlaying");
+  }
+
   const sortSelect = document.getElementById("sortSelect") as HTMLSelectElement | null;
   if (sortSelect) {
     for (const opt of Array.from(sortSelect.options)) {
       if (opt.value === "recent") opt.textContent = tr("sort.recent");
+      if (opt.value === "oldest") opt.textContent = tr("sort.oldest");
       if (opt.value === "az") opt.textContent = tr("sort.az");
       if (opt.value === "za") opt.textContent = tr("sort.za");
     }
@@ -536,6 +624,121 @@ function applyTranslations() {
 
   if (document.getElementById("settingsView")?.style.display !== "none") {
     renderSettingsPage();
+  }
+}
+
+async function getOfflineItemStatus(itemId: string): Promise<{ exists: boolean; trackCount: number }> {
+  try {
+    const status = await invoke<{ exists: boolean; trackCount: number }>("abs_offline_item_status", { itemId });
+    offlineAvailableByItemId.set(itemId, Boolean(status?.exists));
+    return status;
+  } catch {
+    offlineAvailableByItemId.set(itemId, false);
+    return { exists: false, trackCount: 0 };
+  }
+}
+
+async function downloadOfflineItem(itemId: string) {
+  const { serverUrl, username } = getSaved();
+  await invoke("abs_offline_download_item", { serverUrl, username, itemId });
+  if (appSettings.maxOfflineMb > 0) {
+    await invoke("abs_offline_enforce_max_storage", {
+      maxBytes: Math.floor(appSettings.maxOfflineMb * 1024 * 1024),
+    });
+    offlineAvailableByItemId.clear();
+  }
+  offlineAvailableByItemId.set(itemId, true);
+}
+
+async function removeOfflineItem(itemId: string) {
+  await invoke("abs_offline_remove_item", { itemId });
+  offlineAvailableByItemId.set(itemId, false);
+}
+
+async function maybeAutoRemoveOfflineItem(itemId: string) {
+  if (!appSettings.autoRemoveOfflineOnFinished) return;
+  try {
+    const st = await getOfflineItemStatus(itemId);
+    if (st.exists) {
+      await removeOfflineItem(itemId);
+    }
+  } catch (err) {
+    console.log("auto remove offline fail", err);
+  }
+}
+
+async function getOfflineStats(): Promise<OfflineStats> {
+  try {
+    return await invoke<OfflineStats>("abs_offline_stats");
+  } catch {
+    return { itemCount: 0, trackCount: 0 };
+  }
+}
+
+function updateOfflineProgressUi(itemId: string) {
+  const state = offlineDownloadProgressByItemId.get(itemId);
+  const cardLabel = document.querySelector(`[data-offline-progress-item="${itemId}"]`) as HTMLElement | null;
+  if (cardLabel) {
+    if (state && state.status === "downloading") {
+      cardLabel.style.display = "inline-flex";
+      cardLabel.textContent = `${tr("offline.downloading")} ${state.percent}%`;
+    } else {
+      cardLabel.style.display = "none";
+      cardLabel.textContent = "";
+    }
+  }
+
+  if (currentItemId === itemId) {
+    const detailLabel = document.getElementById("detailOfflineProgress");
+    if (detailLabel) {
+      if (state && state.status === "downloading") {
+        detailLabel.textContent = `${tr("offline.downloading")} ${state.percent}%`;
+        detailLabel.style.display = "";
+      } else {
+        detailLabel.textContent = "";
+        detailLabel.style.display = "none";
+      }
+    }
+  }
+}
+
+async function syncQueuedOfflineProgress() {
+  const { serverUrl, username } = getSaved();
+  if (!serverUrl || !username) return;
+  try {
+    await invoke("abs_offline_sync_queued_progress", { serverUrl, username });
+  } catch {
+    // ignore, we'll retry on next online/save cycle
+  }
+}
+
+async function updateProgressWithOfflineFallback(itemId: string, currentTime: number, episodeId: string | null) {
+  const { serverUrl, username } = getSaved();
+  try {
+    await invoke("abs_update_progress", {
+      serverUrl,
+      username,
+      itemId,
+      currentTime,
+      episodeId,
+    });
+  } catch {
+    await invoke("abs_offline_queue_progress", {
+      itemId,
+      episodeId,
+      currentTime,
+    });
+  }
+}
+
+async function getChapterPlaybackUrl(itemId: string, chapterIndex: number, fileIno: string): Promise<string> {
+  try {
+    return await invoke<string>("abs_offline_local_player_url", { itemId, index: chapterIndex });
+  } catch {
+    return await invoke<string>("abs_local_player_url", {
+      libraryId: itemId,
+      index: fileIno,
+    });
   }
 }
 
@@ -582,9 +785,26 @@ function renderSettingsPage() {
       <label for="settingsDefaultSort">${tr("settings.defaultSort")}</label>
       <select id="settingsDefaultSort">
         <option value="recent">${tr("sort.recent")}</option>
+        <option value="oldest">${tr("sort.oldest")}</option>
         <option value="az">${tr("sort.az")}</option>
         <option value="za">${tr("sort.za")}</option>
       </select>
+
+      <label for="settingsDefaultVolume">${tr("settings.defaultVolume")}</label>
+      <input id="settingsDefaultVolume" type="number" min="0" max="100" step="1" />
+
+      <label for="settingsMaxOfflineMb">${tr("settings.maxOfflineMb")}</label>
+      <input id="settingsMaxOfflineMb" type="number" min="0" step="1" />
+
+      <label class="settings-check-row">
+        <input id="settingsAutoDownloadOnPlay" type="checkbox" />
+        <span>${tr("settings.autoDownloadOnPlay")}</span>
+      </label>
+
+      <label class="settings-check-row">
+        <input id="settingsAutoRemoveOfflineOnFinished" type="checkbox" />
+        <span>${tr("settings.autoRemoveOfflineOnFinished")}</span>
+      </label>
 
       <label for="settingsSeekSeconds">${tr("settings.skipSeconds")}</label>
       <input id="settingsSeekSeconds" type="number" min="5" max="120" step="1" />
@@ -609,6 +829,15 @@ function renderSettingsPage() {
         </div>
       </div>
 
+      <div class="settings-update-block">
+        <div class="settings-update-title">${tr("settings.offline")}</div>
+        <div id="settingsOfflineSummary" class="settings-update-hint"></div>
+        <div id="settingsOfflineUsage" class="settings-update-hint"></div>
+        <div class="settings-update-actions">
+          <button id="settingsClearOfflineBtn" type="button">${tr("settings.clearOffline")}</button>
+        </div>
+      </div>
+
       <div class="settings-actions">
         <button id="settingsSaveBtn" type="button">${tr("settings.save")}</button>
         <button id="settingsResetBtn" type="button">${tr("settings.reset")}</button>
@@ -620,12 +849,20 @@ function renderSettingsPage() {
 
   const language = el<HTMLSelectElement>("settingsLanguage");
   const sort = el<HTMLSelectElement>("settingsDefaultSort");
+  const defaultVolume = el<HTMLInputElement>("settingsDefaultVolume");
+  const maxOfflineMb = el<HTMLInputElement>("settingsMaxOfflineMb");
+  const autoDownloadOnPlay = el<HTMLInputElement>("settingsAutoDownloadOnPlay");
+  const autoRemoveOfflineOnFinished = el<HTMLInputElement>("settingsAutoRemoveOfflineOnFinished");
   const seek = el<HTMLInputElement>("settingsSeekSeconds");
   const anim = el<HTMLInputElement>("settingsContinueAnimations");
   const showAuthorEl = el<HTMLInputElement>("settingsShowAuthor");
 
   language.value = appSettings.language;
   sort.value = appSettings.defaultSort;
+  defaultVolume.value = String(appSettings.defaultVolume);
+  maxOfflineMb.value = String(appSettings.maxOfflineMb);
+  autoDownloadOnPlay.checked = appSettings.autoDownloadOnPlay;
+  autoRemoveOfflineOnFinished.checked = appSettings.autoRemoveOfflineOnFinished;
   seek.value = String(appSettings.seekSeconds);
   anim.checked = appSettings.continueAnimations;
   showAuthorEl.checked = appSettings.showAuthor;
@@ -633,6 +870,21 @@ function renderSettingsPage() {
   showAppVersion();
   renderUpdateSection();
   void checkForUpdates();
+  void (async () => {
+    const stats = await getOfflineStats();
+    const summary = document.getElementById("settingsOfflineSummary");
+    if (summary) {
+      summary.textContent = tr("settings.offlineSummary", {
+        items: stats.itemCount,
+        tracks: stats.trackCount,
+      });
+    }
+    const usage = document.getElementById("settingsOfflineUsage");
+    if (usage) {
+      const mb = Math.round((Number(stats.totalBytes || 0) / (1024 * 1024)) * 10) / 10;
+      usage.textContent = tr("settings.offlineUsage", { size: `${mb} MB` });
+    }
+  })();
 }
 
 function normalizeVersion(version: string): string {
@@ -1194,6 +1446,18 @@ async function logOut(serverUrl: string, username: string) {
   await invoke("abs_logout", { serverUrl, username });
 }
 
+function closePopupMenus() {
+  document.querySelectorAll<HTMLElement>(".app-popup-menu").forEach((menu) => {
+    menu.style.display = "none";
+  });
+}
+
+function togglePopupMenu(menu: HTMLElement) {
+  const isOpen = getComputedStyle(menu).display !== "none";
+  closePopupMenus();
+  menu.style.display = isOpen ? "none" : "flex";
+}
+
 /* ---------------- Click handling ---------------- */
 document.addEventListener("click", async (e) => {
   const t = e.target as HTMLElement | null;
@@ -1220,6 +1484,10 @@ document.addEventListener("click", async (e) => {
   ) {
     await backFromDetail();
     return;
+  }
+
+  if (!t.closest(".app-popup-menu, .app-menu-btn, .chapter-menu-btn")) {
+    closePopupMenus();
   }
 
   const clickable = t.closest("[id]") as HTMLElement | null;
@@ -1264,19 +1532,33 @@ document.addEventListener("click", async (e) => {
     if (id === "settingsSaveBtn") {
       const language = (document.getElementById("settingsLanguage") as HTMLSelectElement | null)?.value;
       const defaultSort = (document.getElementById("settingsDefaultSort") as HTMLSelectElement | null)?.value as AppSettings["defaultSort"] | undefined;
+      const defaultVolumeRaw = Number((document.getElementById("settingsDefaultVolume") as HTMLInputElement | null)?.value ?? appSettings.defaultVolume);
+      const maxOfflineMbRaw = Number((document.getElementById("settingsMaxOfflineMb") as HTMLInputElement | null)?.value ?? appSettings.maxOfflineMb);
+      const autoDownloadOnPlay = Boolean((document.getElementById("settingsAutoDownloadOnPlay") as HTMLInputElement | null)?.checked);
+      const autoRemoveOfflineOnFinished = Boolean((document.getElementById("settingsAutoRemoveOfflineOnFinished") as HTMLInputElement | null)?.checked);
       const seekRaw = Number((document.getElementById("settingsSeekSeconds") as HTMLInputElement | null)?.value ?? appSettings.seekSeconds);
       const continueAnimations = Boolean((document.getElementById("settingsContinueAnimations") as HTMLInputElement | null)?.checked);
       const showAuthor = Boolean((document.getElementById("settingsShowAuthor") as HTMLInputElement | null)?.checked);
 
       const next: AppSettings = {
         language: normalizeLanguage(language),
-        defaultSort: defaultSort === "az" || defaultSort === "za" ? defaultSort : "recent",
+        defaultSort: defaultSort === "oldest" || defaultSort === "az" || defaultSort === "za" ? defaultSort : "recent",
+        defaultVolume: Math.max(0, Math.min(100, isFinite(defaultVolumeRaw) ? defaultVolumeRaw : appSettings.defaultVolume)),
+        maxOfflineMb: Math.max(0, Math.min(1024 * 1024, isFinite(maxOfflineMbRaw) ? maxOfflineMbRaw : appSettings.maxOfflineMb)),
+        autoDownloadOnPlay,
+        autoRemoveOfflineOnFinished,
         seekSeconds: Math.max(5, Math.min(120, isFinite(seekRaw) ? seekRaw : appSettings.seekSeconds)),
         continueAnimations,
         showAuthor,
       };
 
       saveSettings(next);
+      if (next.maxOfflineMb > 0) {
+        await invoke("abs_offline_enforce_max_storage", {
+          maxBytes: Math.floor(next.maxOfflineMb * 1024 * 1024),
+        });
+        offlineAvailableByItemId.clear();
+      }
       setMsg("settingsMsg", tr("settings.saved"), "ok");
 
       // Uppdatera placeholdern i sökrutan om den finns
@@ -1294,6 +1576,14 @@ document.addEventListener("click", async (e) => {
       if (currentLibraryItems.length) {
         void renderLibraryGrid();
       }
+    }
+    if (id === "settingsClearOfflineBtn") {
+      await invoke("abs_offline_remove_all");
+      offlineAvailableByItemId.clear();
+      offlineDownloadProgressByItemId.clear();
+      setMsg("settingsMsg", tr("settings.offlineCleared"), "ok");
+      renderSettingsPage();
+      if (currentLibraryItems.length) void renderLibraryGrid();
     }
     if (id === "backBtn") backFromDetail();
     if (id === "winMinBtn") {
@@ -2279,31 +2569,34 @@ async function renderLibraryGrid() {
 
   const sort = (el<HTMLSelectElement>("sortSelect")?.value ?? "recent");
   const list = currentLibraryItems.slice();
+
+  function getAddedDate(obj: any): number {
+    const candidates = [
+      obj?.addedAt,
+      obj?.createdAt,
+      obj?.media?.addedAt,
+      obj?.media?.createdAt,
+      obj?.media?.metadata?.addedAt,
+      obj?.media?.metadata?.createdAt
+    ];
+    for (const val of candidates) {
+      if (!val) continue;
+      if (typeof val === "number" && isFinite(val)) return val;
+      if (typeof val === "string") {
+        const parsed = Date.parse(val);
+        if (!isNaN(parsed)) return parsed;
+      }
+    }
+    return 0;
+  }
+
   if (sort === "az") {
     list.sort((a,b) => (a?.media?.metadata?.title ?? "").localeCompare(b?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
   } else if (sort === "za") {
     list.sort((a,b) => (b?.media?.metadata?.title ?? "").localeCompare(a?.media?.metadata?.title ?? "", appSettings.language, { sensitivity: "base" }));
+  } else if (sort === "oldest") {
+    list.sort((a, b) => getAddedDate(a) - getAddedDate(b));
   } else if (sort === "recent") {
-    function getAddedDate(obj: any): number {
-      // Prova flera vanliga platser för datumfältet
-      const candidates = [
-        obj?.addedAt,
-        obj?.createdAt,
-        obj?.media?.addedAt,
-        obj?.media?.createdAt,
-        obj?.media?.metadata?.addedAt,
-        obj?.media?.metadata?.createdAt
-      ];
-      for (const val of candidates) {
-        if (!val) continue;
-        if (typeof val === "number" && isFinite(val)) return val;
-        if (typeof val === "string") {
-          const parsed = Date.parse(val);
-          if (!isNaN(parsed)) return parsed;
-        }
-      }
-      return 0;
-    }
     list.sort((a, b) => getAddedDate(b) - getAddedDate(a));
   }
 
@@ -2354,84 +2647,57 @@ async function renderLibraryGrid() {
     doneBadge.style.zIndex = "5";
     doneBadge.dataset.libraryDoneItem = String(itemId);
 
+    const offlineProgressBadge = document.createElement("div");
+    offlineProgressBadge.className = "offline-progress-badge";
+    offlineProgressBadge.style.display = "none";
+    offlineProgressBadge.dataset.offlineProgressItem = String(itemId);
+
     const menuBtn = document.createElement("button");
     menuBtn.type = "button";
     menuBtn.textContent = "⋯";
-    menuBtn.style.position = "absolute";
-    menuBtn.style.right = "8px";
-    menuBtn.style.bottom = "8px";
-    menuBtn.style.margin = "0";
-    menuBtn.style.width = "28px";
-    menuBtn.style.height = "28px";
-    menuBtn.style.padding = "0";
-    menuBtn.style.borderRadius = "999px";
-    menuBtn.style.border = "1px solid rgba(255,255,255,.24)";
-    menuBtn.style.background = "rgba(0,0,0,.55)";
-    menuBtn.style.color = "#fff";
-    menuBtn.style.fontSize = "18px";
-    menuBtn.style.lineHeight = "1";
-    menuBtn.style.cursor = "pointer";
-    menuBtn.style.transition = "background .12s ease, border-color .12s ease, transform .12s ease";
-    menuBtn.style.zIndex = "6";
-    menuBtn.addEventListener("mouseenter", () => {
-      menuBtn.style.background = "rgba(0,0,0,.72)";
-      menuBtn.style.borderColor = "rgba(255,255,255,.34)";
-      menuBtn.style.transform = "scale(1.04)";
-    });
-    menuBtn.addEventListener("mouseleave", () => {
-      menuBtn.style.background = "rgba(0,0,0,.55)";
-      menuBtn.style.borderColor = "rgba(255,255,255,.24)";
-      menuBtn.style.transform = "scale(1)";
-    });
+    menuBtn.className = "app-menu-btn";
 
     const menu = document.createElement("div");
     menu.style.position = "absolute";
     menu.style.right = "8px";
     menu.style.bottom = "40px";
-    menu.style.display = "none";
-    menu.style.flexDirection = "column";
-    menu.style.gap = "6px";
-    menu.style.minWidth = "150px";
-    menu.style.padding = "8px";
-    menu.style.border = "1px solid rgba(255,255,255,.2)";
-    menu.style.borderRadius = "10px";
-    menu.style.background = "rgba(20,22,24,.96)";
-    menu.style.zIndex = "7";
+    menu.className = "app-popup-menu";
 
     const markPlayedBtn = document.createElement("button");
     markPlayedBtn.type = "button";
     markPlayedBtn.textContent = tr("menu.markPlayed");
-    markPlayedBtn.style.margin = "0";
-    markPlayedBtn.style.padding = "8px 10px";
-    markPlayedBtn.style.fontSize = "13px";
-    markPlayedBtn.style.border = "1px solid rgba(255,255,255,.18)";
-    markPlayedBtn.style.borderRadius = "8px";
-    markPlayedBtn.style.background = "rgba(255,255,255,.08)";
-    markPlayedBtn.style.color = "inherit";
+    markPlayedBtn.className = "app-popup-action app-popup-action--primary";
 
     const resetBtn = document.createElement("button");
     resetBtn.type = "button";
     resetBtn.textContent = tr("menu.resetUnplayed");
-    resetBtn.style.margin = "0";
-    resetBtn.style.padding = "8px 10px";
-    resetBtn.style.fontSize = "13px";
-    resetBtn.style.border = "1px solid rgba(255,255,255,.18)";
-    resetBtn.style.borderRadius = "8px";
-    resetBtn.style.background = "rgba(255,255,255,.08)";
-    resetBtn.style.color = "inherit";
+    resetBtn.className = "app-popup-action";
     resetBtn.style.display = "none";
 
-    menu.append(markPlayedBtn, resetBtn);
+    const downloadOfflineBtn = document.createElement("button");
+    downloadOfflineBtn.type = "button";
+    downloadOfflineBtn.textContent = tr("menu.downloadOffline");
+    downloadOfflineBtn.className = "app-popup-action";
+
+    const removeOfflineBtn = document.createElement("button");
+    removeOfflineBtn.type = "button";
+    removeOfflineBtn.textContent = tr("menu.removeOffline");
+    removeOfflineBtn.className = "app-popup-action";
+    removeOfflineBtn.style.display = "none";
+
+    menu.append(markPlayedBtn, resetBtn, downloadOfflineBtn, removeOfflineBtn);
 
     menuBtn.onclick = (ev) => {
       ev.stopPropagation();
-      menu.style.display = menu.style.display === "none" ? "flex" : "none";
+      togglePopupMenu(menu);
     };
 
     markPlayedBtn.onclick = async (ev) => {
       ev.stopPropagation();
       await invoke("abs_mark_played", { serverUrl, username, itemId, episodeId: null });
       setLibraryItemDoneState(String(itemId), true);
+      await maybeAutoRemoveOfflineItem(String(itemId));
+      removeOfflineBtn.style.display = "none";
       resetBtn.style.display = "";
       menu.style.display = "none";
       scheduleContinueRefresh(0);
@@ -2447,6 +2713,34 @@ async function renderLibraryGrid() {
       resetBtn.style.display = "none";
       markPlayedBtn.style.display = "";
       scheduleContinueRefresh(0);
+    };
+
+    downloadOfflineBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      downloadOfflineBtn.disabled = true;
+      try {
+        await downloadOfflineItem(String(itemId));
+        removeOfflineBtn.style.display = "";
+      } catch (err) {
+        console.log("offline download failed", err);
+      } finally {
+        downloadOfflineBtn.disabled = false;
+        menu.style.display = "none";
+      }
+    };
+
+    removeOfflineBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      removeOfflineBtn.disabled = true;
+      try {
+        await removeOfflineItem(String(itemId));
+        removeOfflineBtn.style.display = "none";
+      } catch (err) {
+        console.log("offline remove failed", err);
+      } finally {
+        removeOfflineBtn.disabled = false;
+        menu.style.display = "none";
+      }
     };
 
     const meta = document.createElement("div");
@@ -2476,7 +2770,13 @@ async function renderLibraryGrid() {
         .catch(() => {});
     }
 
-    coverWrap.append(img, doneBadge, menuBtn, menu);
+    void getOfflineItemStatus(String(itemId)).then((st) => {
+      removeOfflineBtn.style.display = st.exists ? "" : "none";
+    });
+
+    coverWrap.append(img, doneBadge, offlineProgressBadge, menuBtn, menu);
+
+    updateOfflineProgressUi(String(itemId));
     coverWrap.prepend(bgImg);
     card.append(coverWrap, meta);
     card.onclick = () => showItemDetail(String(itemId));
@@ -2530,6 +2830,9 @@ async function showItemDetail(itemId: string) {
   <button id="resumeBtn">${playLabel}</button>
   <button id="detailMarkPlayedBtn">✓ ${tr("menu.markPlayed")}</button>
   ${(currentItemFinished || startAt > 0) ? `<button id="detailMarkUnplayedBtn">↻ ${tr("menu.resetUnplayed")}</button>` : `<button id="detailMarkUnplayedBtn" style="display:none">↻ ${tr("menu.resetUnplayed")}</button>`}
+  <button id="detailDownloadOfflineBtn">↓ ${tr("menu.downloadOffline")}</button>
+  <button id="detailRemoveOfflineBtn" style="display:none">🗑 ${tr("menu.removeOffline")}</button>
+  <span id="detailOfflineProgress" style="display:none"></span>
   </div>
 
   <div id="detailHeader">
@@ -2599,10 +2902,7 @@ async function showItemDetail(itemId: string) {
     const file = currentFiles[pos.index];
     const fileId = file?.audioFile?.ino || file?.ino;
 
-    const nextUrl = await invoke<string>("abs_local_player_url", {
-      libraryId: itemId,
-      index: fileId
-    })
+    const nextUrl = await getChapterPlaybackUrl(itemId, pos.index, String(fileId ?? ""));
 
     preloadAudio.src = nextUrl
 
@@ -2666,48 +2966,23 @@ async function showItemDetail(itemId: string) {
     const rowMenuBtn = document.createElement("button");
     rowMenuBtn.type = "button";
     rowMenuBtn.textContent = "⋯";
-    rowMenuBtn.style.margin = "0";
-    rowMenuBtn.style.width = "24px";
-    rowMenuBtn.style.height = "24px";
-    rowMenuBtn.style.padding = "0";
-    rowMenuBtn.style.borderRadius = "999px";
-    rowMenuBtn.style.border = "1px solid rgba(255,255,255,.2)";
-    rowMenuBtn.style.background = "rgba(255,255,255,.08)";
-    rowMenuBtn.style.color = "inherit";
-    rowMenuBtn.style.cursor = "pointer";
+    rowMenuBtn.className = "chapter-menu-btn";
 
     const rowMenu = document.createElement("div");
-    rowMenu.style.display = "none";
     rowMenu.style.position = "absolute";
     rowMenu.style.right = "10px";
     rowMenu.style.marginTop = "30px";
-    rowMenu.style.padding = "8px";
-    rowMenu.style.borderRadius = "8px";
-    rowMenu.style.border = "1px solid rgba(255,255,255,.2)";
-    rowMenu.style.background = "rgba(20,22,24,.96)";
-    rowMenu.style.zIndex = "6";
+    rowMenu.className = "app-popup-menu";
 
     const rowMarkPlayed = document.createElement("button");
     rowMarkPlayed.type = "button";
     rowMarkPlayed.textContent = tr("menu.markPlayed");
-    rowMarkPlayed.style.margin = "0";
-    rowMarkPlayed.style.padding = "6px 8px";
-    rowMarkPlayed.style.fontSize = "12px";
-    rowMarkPlayed.style.borderRadius = "6px";
-    rowMarkPlayed.style.border = "1px solid rgba(255,255,255,.18)";
-    rowMarkPlayed.style.background = "rgba(255,255,255,.08)";
-    rowMarkPlayed.style.color = "inherit";
+    rowMarkPlayed.className = "app-popup-action app-popup-action--primary";
 
     const rowReset = document.createElement("button");
     rowReset.type = "button";
     rowReset.textContent = tr("menu.resetUnplayed");
-    rowReset.style.margin = "6px 0 0 0";
-    rowReset.style.padding = "6px 8px";
-    rowReset.style.fontSize = "12px";
-    rowReset.style.borderRadius = "6px";
-    rowReset.style.border = "1px solid rgba(255,255,255,.18)";
-    rowReset.style.background = "rgba(255,255,255,.08)";
-    rowReset.style.color = "inherit";
+    rowReset.className = "app-popup-action";
     rowReset.style.display = "none";
 
     rowMenu.append(rowMarkPlayed, rowReset);
@@ -2716,7 +2991,7 @@ async function showItemDetail(itemId: string) {
 
     rowMenuBtn.onclick = (ev) => {
       ev.stopPropagation();
-      rowMenu.style.display = rowMenu.style.display === "none" ? "block" : "none";
+      togglePopupMenu(rowMenu);
     };
 
     if (isPodcastItem && f?.id) {
@@ -2773,6 +3048,7 @@ async function showItemDetail(itemId: string) {
       ev.stopPropagation();
       try {
         await invoke("abs_mark_played", { serverUrl, username, itemId, episodeId: null });
+        await maybeAutoRemoveOfflineItem(itemId);
         currentItemFinished = true;
         progressByItemId.set(itemId, { currentTime: sumDurationsFromItem(item) });
         await showItemDetail(itemId);
@@ -2797,6 +3073,45 @@ async function showItemDetail(itemId: string) {
         void scheduleContinueRefresh(0);
       } catch (e) {
         console.log("detail mark unplayed fail", e);
+      }
+    };
+  }
+
+  const detailDownloadOfflineBtn = document.getElementById("detailDownloadOfflineBtn") as HTMLButtonElement | null;
+  const detailRemoveOfflineBtn = document.getElementById("detailRemoveOfflineBtn") as HTMLButtonElement | null;
+
+  void getOfflineItemStatus(itemId).then((st) => {
+    if (detailRemoveOfflineBtn) detailRemoveOfflineBtn.style.display = st.exists ? "" : "none";
+  });
+
+  if (detailDownloadOfflineBtn) {
+    detailDownloadOfflineBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      detailDownloadOfflineBtn.disabled = true;
+      try {
+        await downloadOfflineItem(itemId);
+        if (detailRemoveOfflineBtn) detailRemoveOfflineBtn.style.display = "";
+      } catch (e) {
+        console.log("detail offline download fail", e);
+      } finally {
+        detailDownloadOfflineBtn.disabled = false;
+      }
+    };
+  }
+
+  updateOfflineProgressUi(itemId);
+
+  if (detailRemoveOfflineBtn) {
+    detailRemoveOfflineBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      detailRemoveOfflineBtn.disabled = true;
+      try {
+        await removeOfflineItem(itemId);
+        detailRemoveOfflineBtn.style.display = "none";
+      } catch (e) {
+        console.log("detail offline remove fail", e);
+      } finally {
+        detailRemoveOfflineBtn.disabled = false;
       }
     };
   }
@@ -2904,7 +3219,23 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
     highlightChapter(index)
 
     const audio = el<HTMLAudioElement>("player");
+    audio.volume = Math.max(0, Math.min(1, appSettings.defaultVolume / 100));
     audio.style.display = "";
+
+    if (appSettings.autoDownloadOnPlay) {
+      const cachedAvailable = offlineAvailableByItemId.get(itemId) === true;
+      const downloading = offlineDownloadProgressByItemId.get(itemId)?.status === "downloading";
+      if (!cachedAvailable && !downloading) {
+        void (async () => {
+          try {
+            const st = await getOfflineItemStatus(itemId);
+            if (!st.exists) await downloadOfflineItem(itemId);
+          } catch (err) {
+            console.log("auto offline download fail", err);
+          }
+        })();
+      }
+    }
 
     const f = currentFiles[index];
     if (!f) return;
@@ -2924,10 +3255,7 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
       fileDuration: f?.duration ?? f?.audioFile?.duration ?? null,
     });
 
-    const url = await invoke<string>("abs_local_player_url", {
-      libraryId: itemId,
-      index: fileIno
-    });
+    const url = await getChapterPlaybackUrl(itemId, index, String(fileIno ?? ""));
 
     console.log("[play-debug] local playback url", {
       itemId,
@@ -3150,10 +3478,7 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
         const nextFile = currentFiles[next];
         const nextIno = nextFile?.audioFile?.ino || nextFile?.ino;
 
-        const nextUrl = await invoke<string>("abs_local_player_url", {
-          libraryId: itemId,
-          index: nextIno
-        })
+        const nextUrl = await getChapterPlaybackUrl(itemId, next, String(nextIno ?? ""));
 
         preloadAudio.src = nextUrl
 
@@ -3177,6 +3502,9 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
       } else {
 
         await stopPlaybackSession()
+        if (currentItemId) {
+          await maybeAutoRemoveOfflineItem(currentItemId)
+        }
 
       }
     }
@@ -3259,15 +3587,11 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
             ? audio.currentTime
             : audio.currentTime + getChapterStart(currentChapterIndex)
 
-          const { serverUrl, username } = getSaved()
-
-          await invoke("abs_update_progress", {
-            serverUrl,
-            username,
-            itemId: currentItemId,
-            currentTime: absolute,
-            episodeId: isPodcastNow ? currentEpisodeId : null
-          })
+          await updateProgressWithOfflineFallback(
+            currentItemId,
+            absolute,
+            isPodcastNow ? currentEpisodeId : null,
+          )
 
       }, 3000);
 
@@ -3328,13 +3652,11 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
             ? audio.currentTime
             : audio.currentTime + getChapterStart(currentChapterIndex);
 
-          invoke("abs_update_progress", {
-            serverUrl,
-            username,
-            itemId: currentItemId,
-            currentTime: absolute,
-            episodeId: isPodcast ? currentEpisodeId : null
-          }).catch(console.error)
+          updateProgressWithOfflineFallback(
+            currentItemId,
+            absolute,
+            isPodcast ? currentEpisodeId : null,
+          ).catch(console.error)
         }
     }
 
@@ -3389,21 +3711,17 @@ async function forceSaveProgress() {
 
       const audio = el<HTMLAudioElement>("player")
 
-      const { serverUrl, username } = getSaved()
-
       // For podcasts, use just current time; for audiobooks add chapter offset
       const isPodcast = currentFiles[0]?.audioFile !== undefined;
       const absolute = isPodcast
         ? audio.currentTime
         : audio.currentTime + getChapterStart(currentChapterIndex)
 
-      await invoke("abs_update_progress", {
-        serverUrl,
-        username,
-        itemId: currentItemId,
-        currentTime: absolute,
-        episodeId: isPodcast ? currentEpisodeId : null
-      })
+      await updateProgressWithOfflineFallback(
+        currentItemId,
+        absolute,
+        isPodcast ? currentEpisodeId : null,
+      )
 
       // ⭐ hämta ny Continue-data direkt från servern (skip for podcasts to avoid 502s)
       if (!isPodcast) {
@@ -3447,9 +3765,29 @@ async function showAppVersion() {
 
 async function boot() {
   applySettings();
+  await syncQueuedOfflineProgress();
+  window.addEventListener("online", () => {
+    void syncQueuedOfflineProgress();
+  });
+  await listen<{ itemId: string; percent: number; status: "downloading" | "ready" }>(
+    "offline-download-progress",
+    (event) => {
+      const payload = event.payload;
+      if (!payload?.itemId) return;
+      offlineDownloadProgressByItemId.set(payload.itemId, {
+        percent: Math.max(0, Math.min(100, Number(payload.percent) || 0)),
+        status: payload.status,
+      });
+      if (payload.status === "ready") {
+        offlineAvailableByItemId.set(payload.itemId, true);
+        offlineDownloadProgressByItemId.delete(payload.itemId);
+      }
+      updateOfflineProgressUi(payload.itemId);
+    },
+  );
 
   const audio = el<HTMLAudioElement>("player")
-  audio.volume = 1.0
+  audio.volume = Math.max(0, Math.min(1, appSettings.defaultVolume / 100))
   audio.addEventListener("timeupdate", () => {
     maybeEndPlaybackLoading(audio);
   })
@@ -3474,7 +3812,7 @@ async function boot() {
     setPlaybackLoading(false);
   })
 
-  el<HTMLInputElement>("miniVolume").value = "1.0"
+  el<HTMLInputElement>("miniVolume").value = String(Math.max(0, Math.min(1, appSettings.defaultVolume / 100)))
 
   el<HTMLInputElement>("miniVolume").oninput = (e) => {
 
