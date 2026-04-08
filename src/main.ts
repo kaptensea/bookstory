@@ -835,6 +835,7 @@ let favoritesQueueIndex = -1;
 let favoritesQueue: Array<{ itemId: string; episodeId: string; episodeTitle: string; podcastTitle: string }> = [];
 let favoritesQueueTransition = false;
 let sleepTimerStartMs: number | null = null;
+const libraryItemsCache = new Map<string, any[]>();
 
 type OfflineStats = {
   itemCount: number;
@@ -2764,6 +2765,7 @@ async function loadHome() {
   const { serverUrl, username } = getSaved();
   setMsg("homeMsg", "", "none");
   itemCacheById.clear();
+  libraryItemsCache.clear();
 
   const me = await invoke<Json>("abs_get_me", { serverUrl, username });
   const inProgress = await invoke<any>("abs_get_items_in_progress", { serverUrl, username });
@@ -2777,6 +2779,23 @@ async function loadHome() {
   // Render continue listening med filter per bibliotek
   await renderLibraries(libraries);
   // await renderContinueListening(lastInProgress);
+
+  // Cache all library items in the background (non-blocking)
+  const libsArr: any[] = Array.isArray(libraries) ? libraries : (libraries?.libraries ?? []);
+  void (async () => {
+    for (const lib of libsArr) {
+      if (!libraryItemsCache.has(String(lib.id))) {
+        try {
+          const items = await invoke<any>("abs_get_library_items", {
+            serverUrl, username, libraryId: lib.id
+          });
+          libraryItemsCache.set(String(lib.id), items?.items ?? items?.results ?? items ?? []);
+        } catch (e) {
+          console.log(`Cache load failed for library ${lib.id}:`, e);
+        }
+      }
+    }
+  })();
 
   // Pre-warm global search index in background to speed up first search interaction.
   if (!searchIndexReady && !searchIndexLoadPromise) {
@@ -2808,20 +2827,32 @@ async function renderLibraries(libraries: any) {
 
     const { serverUrl, username } = getSaved();
     const grid = el("libraryItemsView");
-    grid.classList.add("loading");
     currentLibraryId = select.value;
+    const selected = libsArr.find((x) => String(x.id) === currentLibraryId);
+    currentLibraryMediaType = selected?.mediaType ?? selected?.type ?? null;
+
+    // Check if items are already cached
+    const cachedItems = libraryItemsCache.get(currentLibraryId);
+    if (cachedItems) {
+      // Use cached data immediately, no loading state
+      setMsg("homeMsg", "", "none");
+      showLibraryItems(selected?.name ?? "Library", cachedItems);
+      await renderContinueListening(lastInProgress);
+      await renderPlaylist();
+      return;
+    }
+
+    // If not cached yet, show loading while fetching
+    grid.classList.add("loading");
     setMsg("homeMsg", tr("home.loadingLibrary"), "none");
 
     try {
       const items = await invoke<any>("abs_get_library_items", {
         serverUrl, username, libraryId: currentLibraryId
       });
+      libraryItemsCache.set(currentLibraryId, items?.items ?? items?.results ?? items ?? []);
 
-      const selected = libsArr.find((x) => String(x.id) === currentLibraryId);
-      currentLibraryMediaType = selected?.mediaType ?? selected?.type ?? null;
       showLibraryItems(selected?.name ?? "Library", items);
-
-      // Uppdatera continue-lista med filtrering per bibliotek
       await renderContinueListening(lastInProgress);
       await renderPlaylist();
     } finally {
@@ -3532,6 +3563,8 @@ function wireSortSelect() {
   sortSelect.addEventListener("change", async () => {
     if (isVisible("settingsView")) hideSettingsPage();
     if (isVisible("itemDetailView")) await backFromDetail();
+    // Reload Continue Listening on sort change since display might differ
+    await renderContinueListening(lastInProgress);
     if (currentLibraryItems.length) void renderLibraryGrid();
   });
 }
