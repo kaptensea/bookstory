@@ -77,6 +77,7 @@
             <option value="za">Z → A</option>
           </select>
           <h3 id="sidebarMenuLabel">Menu</h3>
+          <button id="playlistBtn" style="margin-top:12px;">Favorites</button>
           <button id="settingsBtn" style="margin-top:12px;">Settings</button>
           <button id="logoutBtn" style="margin-top:12px;">Log out</button>
           <div id="whoami" class="sidebar-whoami"></div>
@@ -107,9 +108,18 @@
             </div>
           </section>
 
+          <section id="playNextSection">
+            <h2 id="playNextHeading">Play Next</h2>
+            <div id="playNextList" class="list"></div>
+            <div id="playNextEmpty" class="hint" style="display:none;">
+              No next items yet.
+            </div>
+          </section>
+
           <div id="libraryTotal" class="library-total"></div>
           <div id="libraryItemsView"></div>
           <div id="itemDetailView" style="display:none;"></div>
+          <div id="playlistView" style="display:none;"></div>
           <div id="settingsView" style="display:none;"></div>
           <div id="homeMsg" class="msg"></div>
         </main>
@@ -146,6 +156,11 @@
       <button id="miniPlayPause">▶</button>
       <button id="miniNextChapter">❯</button>
       <button id="openNowPlaying">▲</button>
+  </div>
+
+  <div id="miniExtraControls" class="mini-extra-controls">
+    <button id="miniSpeedBtn" class="mini-speed-btn" title="Playback speed">⏯ x1.00</button>
+    <button id="miniSleepBtn" class="mini-sleep-btn" title="Sleep timer">⏱ Off</button>
   </div>
 
   <div id="miniVolumeWrap">
@@ -188,6 +203,11 @@
   <button id="npForward">❯</button>
   <button id="npNextChapter">⏭</button>
 </div>
+
+  <div class="np-extra-controls">
+    <button id="npSpeedBtn" class="np-speed-btn" title="Playback speed">1.0x</button>
+    <button id="npSleepBtn" class="np-sleep-btn" title="Sleep timer">⏱</button>
+  </div>
 
 </div>
   </body>

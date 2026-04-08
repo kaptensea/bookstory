@@ -1,7 +1,21 @@
+import * as Features from "./features";
+
 // --- Global Search ---
 let allLibraryItems: any[] = [];
-let searchResults: any[] = [];
+type SearchResult = {
+  item: any;
+  title: string;
+  subtitle: string;
+  episodeIndex: number | null;
+  episodeId: string | null;
+};
+
+let searchResults: SearchResult[] = [];
 let searchDropdown: HTMLElement | null = null;
+let searchFocusedChapterRow: HTMLElement | null = null;
+let searchIndexLoadPromise: Promise<void> | null = null;
+let searchIndexReady = false;
+let searchInputRequestId = 0;
 
 async function fetchAllLibrariesAndItems() {
   const { serverUrl, username } = getSaved();
@@ -12,34 +26,136 @@ async function fetchAllLibrariesAndItems() {
     try {
       const libItems = await invoke<any>("abs_get_library_items", { serverUrl, username, libraryId: lib.id });
       const arr = libItems?.items ?? libItems?.results ?? libItems ?? [];
-      for (const item of arr) {
-        items.push({ ...item, __library: lib });
+      const isPodcastLibrary = String(lib?.mediaType ?? lib?.type ?? "").toLowerCase() === "podcast";
+
+      if (isPodcastLibrary) {
+        const hydrated = await Promise.all(arr.map(async (item: any) => {
+          if (!item?.id) return { ...item, __library: lib };
+          try {
+            const fullItem = await invoke<any>("abs_get_item", { serverUrl, username, itemId: item.id });
+            return {
+              ...item,
+              ...fullItem,
+              media: fullItem?.media ?? item?.media,
+              __library: lib,
+            };
+          } catch {
+            return { ...item, __library: lib };
+          }
+        }));
+        items.push(...hydrated);
+      } else {
+        for (const item of arr) {
+          items.push({ ...item, __library: lib });
+        }
       }
     } catch (e) { /* skip failed libs */ }
   }
   allLibraryItems = items;
 }
 
-function filterSearchItems(query: string) {
+function ensureSearchIndexLoaded(): Promise<void> {
+  if (searchIndexReady) return Promise.resolve();
+  if (!searchIndexLoadPromise) {
+    searchIndexLoadPromise = fetchAllLibrariesAndItems()
+      .then(() => {
+        searchIndexReady = true;
+      })
+      .finally(() => {
+        searchIndexLoadPromise = null;
+      });
+  }
+  return searchIndexLoadPromise;
+}
+
+function renderSearchLoadingDropdown() {
+  const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
+  if (!searchInput) return;
+  if (!searchDropdown) {
+    searchDropdown = document.createElement("div");
+    searchDropdown.id = "searchDropdown";
+    searchDropdown.style.position = "fixed";
+    searchDropdown.style.zIndex = "1000";
+    searchDropdown.style.background = "#222";
+    searchDropdown.style.border = "1px solid #444";
+    searchDropdown.style.borderRadius = "8px";
+    searchDropdown.style.boxShadow = "0 2px 8px #0008";
+    searchDropdown.style.maxHeight = "340px";
+    searchDropdown.style.overflowY = "auto";
+    searchDropdown.style.padding = "4px 0";
+    document.body.appendChild(searchDropdown);
+  }
+  const inputRect = searchInput.getBoundingClientRect();
+  searchDropdown.style.left = inputRect.left + "px";
+  searchDropdown.style.top = (inputRect.top + inputRect.height) + "px";
+  searchDropdown.style.width = inputRect.width + "px";
+  searchDropdown.style.right = "auto";
+
+  searchDropdown.innerHTML = "";
+  const row = document.createElement("div");
+  row.textContent = "Indexing library...";
+  row.style.padding = "12px 18px";
+  row.style.color = "#aaa";
+  searchDropdown.appendChild(row);
+}
+
+function filterSearchItems(query: string): SearchResult[] {
   if (!query || !allLibraryItems.length) return [];
   const q = query.trim().toLowerCase();
-  return allLibraryItems.filter(item => {
+
+  const matches: SearchResult[] = [];
+
+  for (const item of allLibraryItems) {
     const title = item?.media?.metadata?.title?.toLowerCase?.() || "";
     const author = item?.media?.metadata?.authorName?.toLowerCase?.() || "";
-    const isPodcast = Array.isArray(item?.media?.episodes);
-    const podcastName = isPodcast ? title : "";
-    return (
-      title.includes(q) ||
-      author.includes(q) ||
-      (isPodcast && podcastName.includes(q))
-    );
-  });
+    const isPodcast =
+      Array.isArray(item?.media?.episodes) ||
+      Array.isArray(item?.media?.episodeContent) ||
+      String(item?.mediaType ?? item?.__library?.mediaType ?? item?.__library?.type ?? "").toLowerCase() === "podcast";
+
+    if (title.includes(q) || author.includes(q)) {
+      matches.push({
+        item,
+        title: item?.media?.metadata?.title || "",
+        subtitle: item?.media?.metadata?.authorName || "",
+        episodeIndex: null,
+        episodeId: null,
+      });
+    }
+
+    if (!isPodcast) continue;
+
+    const episodeEntries = (Array.isArray(item?.media?.episodes)
+      ? item.media.episodes
+      : Array.isArray(item?.media?.episodeContent)
+        ? item.media.episodeContent
+        : [])
+      .slice()
+      .sort((a: any, b: any) => (a?.index ?? 0) - (b?.index ?? 0));
+
+    for (let i = 0; i < episodeEntries.length; i++) {
+      const episodeLabel = getTrackDisplayName(episodeEntries[i], i);
+      if (!episodeLabel?.toLowerCase?.().includes(q)) continue;
+
+      const podcastTitle = item?.media?.metadata?.title || "";
+      const podcastAuthor = item?.media?.metadata?.authorName || "";
+      matches.push({
+        item,
+        title: episodeLabel,
+        subtitle: podcastAuthor ? `${podcastTitle} - ${podcastAuthor}` : podcastTitle,
+        episodeIndex: i,
+        episodeId: episodeEntries[i]?.id ? String(episodeEntries[i].id) : null,
+      });
+    }
+  }
+
+  return matches;
 }
 
 // Enkel cache för cover-url:er per item-id
 const coverUrlCache: Record<string, string> = {};
 
-async function renderSearchDropdown(results: any[], query: string) {
+async function renderSearchDropdown(results: SearchResult[], query: string) {
   const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
   if (!searchDropdown) {
     searchDropdown = document.createElement("div");
@@ -73,9 +189,8 @@ async function renderSearchDropdown(results: any[], query: string) {
     return;
   }
   const { serverUrl, username } = getSaved();
-  for (const item of results.slice(0, 15)) {
-    const title = item?.media?.metadata?.title || "";
-    const author = item?.media?.metadata?.authorName || "";
+  for (const result of results.slice(0, 15)) {
+    const item = result.item;
     const row = document.createElement("div");
     row.className = "search-result-row";
     row.style.display = "flex";
@@ -90,7 +205,10 @@ async function renderSearchDropdown(results: any[], query: string) {
       // Töm sökrutan
       const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
       if (searchInput) searchInput.value = "";
-      showItemDetail(item.id);
+      showItemDetail(item.id, {
+        focusEpisodeIndex: result.episodeIndex,
+        focusEpisodeId: result.episodeId,
+      });
     };
     const img = document.createElement("img");
     img.alt = "cover";
@@ -119,16 +237,16 @@ async function renderSearchDropdown(results: any[], query: string) {
     meta.style.flexDirection = "column";
     meta.style.gap = "2px";
     const t = document.createElement("span");
-    t.textContent = title;
+    t.textContent = result.title;
     t.style.fontWeight = "bold";
     t.style.color = "#fff";
     const a = document.createElement("span");
-    a.textContent = author;
+    a.textContent = result.subtitle;
     a.style.fontSize = "13px";
     a.style.color = "#aaa";
     // Ta bort typ-raden (Book/Podcast)
     meta.appendChild(t);
-    if (author) meta.appendChild(a);
+    if (result.subtitle) meta.appendChild(a);
     row.appendChild(img);
     row.appendChild(meta);
     searchDropdown.appendChild(row);
@@ -149,21 +267,37 @@ window.addEventListener("DOMContentLoaded", () => {
   // Sätt placeholder enligt valt språk
   searchInput.placeholder = tr("search.placeholder");
   let lastQuery = "";
-  let fetchStarted = false;
   searchInput.addEventListener("input", async () => {
+    const requestId = ++searchInputRequestId;
     const val = searchInput.value.trim();
-    if (!fetchStarted) {
-      fetchStarted = true;
-      await fetchAllLibrariesAndItems();
-    }
     if (!val) {
       hideSearchDropdown();
+      lastQuery = "";
       return;
     }
-    if (val === lastQuery) return;
-    lastQuery = val;
-    searchResults = filterSearchItems(val);
-    renderSearchDropdown(searchResults, val);
+
+    if (!searchIndexReady) {
+      renderSearchLoadingDropdown();
+      try {
+        await ensureSearchIndexLoaded();
+      } catch {
+        hideSearchDropdown();
+        return;
+      }
+      if (requestId !== searchInputRequestId) return;
+    }
+
+    const liveVal = searchInput.value.trim();
+    if (!liveVal) {
+      hideSearchDropdown();
+      lastQuery = "";
+      return;
+    }
+    if (liveVal === lastQuery) return;
+
+    lastQuery = liveVal;
+    searchResults = filterSearchItems(liveVal);
+    renderSearchDropdown(searchResults, liveVal);
   });
   // Hide dropdown on outside click
   document.addEventListener("click", (e) => {
@@ -192,6 +326,11 @@ type AppSettings = {
   seekSeconds: number;
   continueAnimations: boolean;
   showAuthor: boolean;
+  playbackRate: number;
+  sleepTimerMode: "none" | "episode" | "minutes";
+  sleepTimerMinutes: number;
+  autoMarkPlayedOnFinish: boolean;
+  usePlaylistOverlay: boolean;
 };
 
 type InstallKind = "aur" | "appimage" | "deb" | "rpm" | "system" | "unknown";
@@ -221,6 +360,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   seekSeconds: 15,
   continueAnimations: true,
   showAuthor: false,
+  playbackRate: 1.0,
+  sleepTimerMode: "none",
+  sleepTimerMinutes: 30,
+  autoMarkPlayedOnFinish: false,
+  usePlaylistOverlay: true,
 };
 
 const coverMissingUrl = new URL("./assets/covermissing.svg", import.meta.url).href;
@@ -240,6 +384,8 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "sidebar.logout": "Log out",
     "home.continue": "Continue Listening",
     "home.empty": "Nothing in progress yet.",
+    "home.playNext": "Play Next",
+    "home.playNextEmpty": "No next items yet.",
     "home.loadingLibrary": "Loading library...",
     "mini.nothingPlaying": "Nothing playing",
     "np.buffering": "Buffering...",
@@ -254,12 +400,23 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "common.play": "Play",
     "common.resume": "Resume",
     "common.playAgain": "Play again",
+    "podcast.sort.label": "Sort episodes",
+    "podcast.sort.oldest": "Oldest",
+    "podcast.sort.latest": "Latest",
+    "podcast.sort.name": "Name",
+    "podcast.filter.label": "Filter",
+    "podcast.filter.all": "All",
+    "podcast.filter.unplayed": "Unplayed",
+    "podcast.filter.downloaded": "Downloaded",
+    "podcast.playNext": "Play next",
     "continue.resumeTitle": "Resume playback",
     "continue.markPlayedTitle": "Mark as played",
     "menu.markPlayed": "Mark as played",
     "menu.resetUnplayed": "Reset / mark as unplayed",
     "menu.downloadOffline": "Download offline",
     "menu.removeOffline": "Remove offline",
+    "menu.downloadEpisodeOffline": "Download episode offline",
+    "menu.removeEpisodeOffline": "Remove episode offline",
     "offline.saved": "Saved for offline listening",
     "offline.removed": "Offline files removed",
     "offline.downloading": "Downloading",
@@ -277,7 +434,7 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "settings.defaultVolume": "Default volume (%)",
     "settings.maxOfflineMb": "Max offline storage (MB, 0 = unlimited)",
     "settings.autoDownloadOnPlay": "Auto-download item when playback starts",
-    "settings.autoRemoveOfflineOnFinished": "Auto-remove offline when book finishes",
+    "settings.autoRemoveOfflineOnFinished": "Auto-remove offline when book/episode finishes",
     "settings.skipSeconds": "Skip seconds (back/forward)",
     "settings.animations": "Enable Continue card animations",
     "settings.showAuthor": "Show author name on book cards",
@@ -307,6 +464,35 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "cover.missing": "Missing cover",
     "label.book.singular": "book",
     "label.book.plural": "books",
+    "playback.speed": "Playback speed",
+    "playback.speed.normal": "Normal",
+    "playback.sleepTimer": "Sleep timer",
+    "playback.sleepTimer.off": "Off",
+    "playback.sleepTimer.episode": "End of episode",
+    "playback.sleepTimer.minutes": "After {{minutes}} min",
+    "playback.sleepTimer.active": "Sleep timer active - stops at {{time}}",
+    "playback.autoMarkPlayed": "Auto-mark as played when finished",
+    "playback.stopAt": "Will stop after this episode",
+    "playlist.title": "Favorites",
+    "playlist.button": "Favorites ({{count}})",
+    "playlist.empty": "No items in playlist",
+    "playlist.emptyView": "No episodes in playlist yet.",
+    "playlist.add": "Add to playlist",
+    "playlist.remove": "Remove from playlist",
+    "playlist.clear": "Clear playlist",
+    "playlist.removeEpisode": "Remove",
+    "playlist.playEpisode": "Play",
+    "playlist.playAll": "Play favorites",
+    "playlist.queueBadge": "Favorites queue",
+    "playlist.playlistOnly": "Playlist ({{count}} items)",
+    "playlist.saved": "Added to playlist",
+    "playlist.removed": "Removed from playlist",
+    "playlist.cleared": "Playlist cleared",
+    "settings.playbackSpeed": "Playback speed",
+    "settings.sleepTimer": "Sleep timer",
+    "settings.sleepTimerDefault": "Default sleep timer (minutes, 0 = off)",
+    "settings.autoMarkOnFinish": "Auto-mark played when finished",
+    "settings.usePlaylistOverlay": "Show playlist overlay while playing",
   },
   sv: {
     "search.placeholder": "Sök...",
@@ -322,6 +508,8 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "sidebar.logout": "Logga ut",
     "home.continue": "Forts\u00e4tt lyssna",
     "home.empty": "Inget p\u00e5g\u00e5r just nu.",
+    "home.playNext": "Spela n\u00e4sta",
+    "home.playNextEmpty": "Inga n\u00e4sta objekt just nu.",
     "home.loadingLibrary": "Laddar bibliotek...",
     "mini.nothingPlaying": "Inget spelas",
     "np.buffering": "Buffrar...",
@@ -336,12 +524,23 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "common.play": "Spela",
     "common.resume": "Forts\u00e4tt",
     "common.playAgain": "Spela igen",
+    "podcast.sort.label": "Sortera avsnitt",
+    "podcast.sort.oldest": "\u00c4ldst",
+    "podcast.sort.latest": "Senaste",
+    "podcast.sort.name": "Namn",
+    "podcast.filter.label": "Filter",
+    "podcast.filter.all": "Alla",
+    "podcast.filter.unplayed": "Ospelade",
+    "podcast.filter.downloaded": "Nedladdade",
+    "podcast.playNext": "Spela n\u00e4sta",
     "continue.resumeTitle": "Forts\u00e4tt uppspelning",
     "continue.markPlayedTitle": "Markera som spelad",
     "menu.markPlayed": "Markera som spelad",
     "menu.resetUnplayed": "\u00c5terst\u00e4ll / markera som ospelad",
     "menu.downloadOffline": "Ladda ner offline",
     "menu.removeOffline": "Ta bort offline",
+    "menu.downloadEpisodeOffline": "Ladda ner avsnitt offline",
+    "menu.removeEpisodeOffline": "Ta bort avsnitt offline",
     "offline.saved": "Sparad f\u00f6r offline-lyssning",
     "offline.removed": "Offline-filer borttagna",
     "offline.downloading": "Laddar ner",
@@ -359,7 +558,7 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "settings.defaultVolume": "Standardvolym (%)",
     "settings.maxOfflineMb": "Max offline-lagring (MB, 0 = obegränsat)",
     "settings.autoDownloadOnPlay": "Ladda ner automatiskt när uppspelning startar",
-    "settings.autoRemoveOfflineOnFinished": "Ta bort offline automatiskt när boken är klar",
+    "settings.autoRemoveOfflineOnFinished": "Ta bort offline automatiskt när boken/avsnittet är klart",
     "settings.skipSeconds": "Hoppa sekunder (bak/fram)",
     "settings.animations": "Aktivera animationer i Forts\u00e4tt lyssna",
     "settings.showAuthor": "Visa f\u00f6rfattare p\u00e5 bokskort",
@@ -389,6 +588,25 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "cover.missing": "Saknar omslag",
     "label.book.singular": "bok",
     "label.book.plural": "b\u00f6cker",
+    "playback.speed": "Uppspelningshastighet",
+    "playback.speed.normal": "Normal",
+    "playback.sleepTimer": "Slumtimer",
+    "playback.sleepTimer.off": "Av",
+    "playback.sleepTimer.episode": "Slutet av avsnittet",
+    "playback.sleepTimer.minutes": "30 minuter",
+    "playback.sleepTimer.active": "Slumtimer aktiv",
+    "playback.autoMarkPlayed": "Markera automatiskt som spelad n\u00e4r klar",
+    "playlist.add": "L\u00e4gg till i spellista",
+    "playlist.remove": "Ta bort fr\u00e5n spellista",
+    "playlist.title": "Favoriter",
+    "playlist.button": "Favoriter ({{count}})",
+    "playlist.empty": "Ingen spellista",
+    "playlist.emptyView": "Inga avsnitt i spellistan än.",
+    "playlist.clear": "Rensa spellista",
+    "playlist.removeEpisode": "Ta bort",
+    "playlist.playEpisode": "Spela",
+    "playlist.playAll": "Spela favoriter",
+    "playlist.queueBadge": "Favoritko",
   },
   de: {
     "search.placeholder": "Suchen...",
@@ -404,6 +622,8 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "sidebar.logout": "Abmelden",
     "home.continue": "Weiterh\u00f6ren",
     "home.empty": "Noch nichts in Wiedergabe.",
+    "home.playNext": "Als N\u00e4chstes",
+    "home.playNextEmpty": "Noch keine n\u00e4chsten Elemente.",
     "home.loadingLibrary": "Bibliothek wird geladen...",
     "mini.nothingPlaying": "Nichts wird abgespielt",
     "np.buffering": "Puffert...",
@@ -418,12 +638,23 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "common.play": "Abspielen",
     "common.resume": "Fortsetzen",
     "common.playAgain": "Erneut abspielen",
+    "podcast.sort.label": "Episoden sortieren",
+    "podcast.sort.oldest": "\u00c4lteste",
+    "podcast.sort.latest": "Neueste",
+    "podcast.sort.name": "Name",
+    "podcast.filter.label": "Filter",
+    "podcast.filter.all": "Alle",
+    "podcast.filter.unplayed": "Ungeh\u00f6rt",
+    "podcast.filter.downloaded": "Heruntergeladen",
+    "podcast.playNext": "N\u00e4chste abspielen",
     "continue.resumeTitle": "Wiedergabe fortsetzen",
     "continue.markPlayedTitle": "Als abgespielt markieren",
     "menu.markPlayed": "Als abgespielt markieren",
     "menu.resetUnplayed": "Zur\u00fccksetzen / als nicht abgespielt markieren",
     "menu.downloadOffline": "Offline herunterladen",
     "menu.removeOffline": "Offline entfernen",
+    "menu.downloadEpisodeOffline": "Episode offline herunterladen",
+    "menu.removeEpisodeOffline": "Episode offline entfernen",
     "offline.saved": "F\u00fcr Offline-Wiedergabe gespeichert",
     "offline.removed": "Offline-Dateien entfernt",
     "offline.downloading": "Wird heruntergeladen",
@@ -441,7 +672,7 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "settings.defaultVolume": "Standardlautstärke (%)",
     "settings.maxOfflineMb": "Max. Offline-Speicher (MB, 0 = unbegrenzt)",
     "settings.autoDownloadOnPlay": "Element automatisch herunterladen, wenn Wiedergabe startet",
-    "settings.autoRemoveOfflineOnFinished": "Offline automatisch entfernen, wenn Buch fertig ist",
+    "settings.autoRemoveOfflineOnFinished": "Offline automatisch entfernen, wenn Buch/Episode fertig ist",
     "settings.skipSeconds": "Sekunden springen (zur\u00fcck/vor)",
     "settings.animations": "Animationen f\u00fcr Weiterh\u00f6ren-Karten aktivieren",
     "settings.showAuthor": "Autor auf Buchkarten anzeigen",
@@ -471,6 +702,25 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "cover.missing": "Cover fehlt",
     "label.book.singular": "Buch",
     "label.book.plural": "B\u00fccher",
+    "playback.speed": "Wiedergabegeschwindigkeit",
+    "playback.speed.normal": "Normal",
+    "playback.sleepTimer": "Sleep-Timer",
+    "playback.sleepTimer.off": "Aus",
+    "playback.sleepTimer.episode": "Am Ende der Episode",
+    "playback.sleepTimer.minutes": "30 Minuten",
+    "playback.sleepTimer.active": "Sleep-Timer aktiv",
+    "playback.autoMarkPlayed": "Automatisch als abgespielt markieren, wenn abgeschlossen",
+    "playlist.add": "Zur Playlist hinzuf\u00fcgen",
+    "playlist.remove": "Aus Playlist entfernen",
+    "playlist.title": "Favoriten",
+    "playlist.button": "Favoriten ({{count}})",
+    "playlist.empty": "Keine Playlist",
+    "playlist.emptyView": "Noch keine Episoden in der Playlist.",
+    "playlist.clear": "Playlist leeren",
+    "playlist.removeEpisode": "Entfernen",
+    "playlist.playEpisode": "Abspielen",
+    "playlist.playAll": "Favoriten abspielen",
+    "playlist.queueBadge": "Favoriten-Warteschlange",
   }
 };
 
@@ -501,6 +751,8 @@ let currentEpisodeId: string | null = null
 let currentItemFinished = false
 let hasStartedPlayback = false
 let currentLibraryMediaType: string | null = null
+let detailPodcastSortMode: "oldest" | "latest" | "name" = "oldest";
+let detailPodcastFilterMode: "all" | "unplayed" | "downloaded" = "all";
 const progressByItemId = new Map<string, { currentTime: number; progress?: number }>();
 let currentLibraryItemIds = new Set<string>();
 let currentLibraryItems: any[] = [];
@@ -529,6 +781,12 @@ let updateCheckPromise: Promise<UpdateState> | null = null;
 let updateBannerDismissed = false;
 const offlineAvailableByItemId = new Map<string, boolean>();
 const offlineDownloadProgressByItemId = new Map<string, { percent: number; status: "downloading" | "ready" }>();
+const podcastEpisodeFinishedCache = new Map<string, { ts: number; finishedIds: Set<string> }>();
+const PODCAST_EPISODE_PROGRESS_CACHE_MS = 120000;
+let favoritesQueueActive = false;
+let favoritesQueueIndex = -1;
+let favoritesQueue: Array<{ itemId: string; episodeId: string; episodeTitle: string; podcastTitle: string }> = [];
+let favoritesQueueTransition = false;
 
 type OfflineStats = {
   itemCount: number;
@@ -563,6 +821,11 @@ function loadSettings(): AppSettings {
       seekSeconds: Math.max(5, Math.min(120, Number(parsed?.seekSeconds) || DEFAULT_SETTINGS.seekSeconds)),
       continueAnimations: parsed?.continueAnimations !== false,
       showAuthor: parsed?.showAuthor === true,
+      playbackRate: [0.75, 1.0, 1.25, 1.5, 2.0].includes(parsed?.playbackRate) ? parsed.playbackRate : DEFAULT_SETTINGS.playbackRate,
+      sleepTimerMode: ["none", "episode", "minutes"].includes(parsed?.sleepTimerMode) ? parsed.sleepTimerMode : DEFAULT_SETTINGS.sleepTimerMode,
+      sleepTimerMinutes: Math.max(1, Math.min(120, Number(parsed?.sleepTimerMinutes) || DEFAULT_SETTINGS.sleepTimerMinutes)),
+      autoMarkPlayedOnFinish: parsed?.autoMarkPlayedOnFinish === true,
+      usePlaylistOverlay: parsed?.usePlaylistOverlay !== false,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -582,6 +845,7 @@ function applySettings() {
   const audio = document.getElementById("player") as HTMLAudioElement | null;
   const vol = Math.max(0, Math.min(1, appSettings.defaultVolume / 100));
   if (audio) audio.volume = vol;
+  if (audio) audio.playbackRate = appSettings.playbackRate;
   const miniVolume = document.getElementById("miniVolume") as HTMLInputElement | null;
   if (miniVolume) miniVolume.value = String(vol);
 
@@ -601,10 +865,13 @@ function applyTranslations() {
   setTextIfExists("sidebarLibraryLabel", tr("sidebar.library"));
   setTextIfExists("sidebarSortLabel", tr("sidebar.sort"));
   setTextIfExists("sidebarMenuLabel", tr("sidebar.menu"));
+  setTextIfExists("playlistBtn", tr("playlist.button", { count: Features.getPlaylistEntries().length }));
   setTextIfExists("settingsBtn", tr("sidebar.settings"));
   setTextIfExists("logoutBtn", tr("sidebar.logout"));
   setTextIfExists("continueHeading", tr("home.continue"));
   setTextIfExists("continueEmpty", tr("home.empty"));
+  setTextIfExists("playNextHeading", tr("home.playNext"));
+  setTextIfExists("playNextEmpty", tr("home.playNextEmpty"));
   setTextIfExists("npLoadingText", tr("np.buffering"));
 
   const miniTitleEl = document.getElementById("miniTitle");
@@ -620,6 +887,12 @@ function applyTranslations() {
       if (opt.value === "az") opt.textContent = tr("sort.az");
       if (opt.value === "za") opt.textContent = tr("sort.za");
     }
+  }
+
+  void renderPlaylist();
+
+  if (isVisible("playlistView")) {
+    void renderPlaylistPage();
   }
 
   if (document.getElementById("settingsView")?.style.display !== "none") {
@@ -648,6 +921,30 @@ async function downloadOfflineItem(itemId: string) {
     offlineAvailableByItemId.clear();
   }
   offlineAvailableByItemId.set(itemId, true);
+}
+
+async function getOfflineEpisodeIds(itemId: string): Promise<Set<string>> {
+  try {
+    const ids = await invoke<string[]>("abs_offline_item_episode_ids", { itemId });
+    return new Set((Array.isArray(ids) ? ids : []).map((x) => String(x)));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+async function downloadOfflineEpisode(itemId: string, episodeId: string) {
+  const { serverUrl, username } = getSaved();
+  await invoke("abs_offline_download_episode", { serverUrl, username, itemId, episodeId });
+  if (appSettings.maxOfflineMb > 0) {
+    await invoke("abs_offline_enforce_max_storage", {
+      maxBytes: Math.floor(appSettings.maxOfflineMb * 1024 * 1024),
+    });
+    offlineAvailableByItemId.clear();
+  }
+}
+
+async function removeOfflineEpisode(itemId: string, episodeId: string) {
+  await invoke("abs_offline_remove_episode", { itemId, episodeId });
 }
 
 async function removeOfflineItem(itemId: string) {
@@ -750,6 +1047,7 @@ function showSettingsPage() {
   setContinueVisible(false);
   show(el("libraryItemsView"), false);
   show(el("itemDetailView"), false);
+  show(el("playlistView"), false);
   show(el("settingsView"), true);
   renderSettingsPage();
 }
@@ -760,10 +1058,132 @@ function hideSettingsPage() {
   show(el("libraryItemsView"), true);
 }
 
+function showPlaylistPage() {
+  setContinueVisible(false);
+  show(el("libraryItemsView"), false);
+  show(el("itemDetailView"), false);
+  show(el("settingsView"), false);
+  show(el("playlistView"), true);
+  void renderPlaylistPage();
+}
+
+function hidePlaylistPage() {
+  show(el("playlistView"), false);
+  setContinueVisible(true);
+  show(el("libraryItemsView"), true);
+}
+
+function stopFavoritesQueue() {
+  favoritesQueueActive = false;
+  favoritesQueueIndex = -1;
+  favoritesQueue = [];
+}
+
+function startFavoritesQueueFrom(entries: Array<{ itemId: string; episodeId: string; episodeTitle: string; podcastTitle: string }>, startIndex: number) {
+  favoritesQueue = entries.slice();
+  favoritesQueueIndex = Math.max(0, Math.min(startIndex, favoritesQueue.length - 1));
+  favoritesQueueActive = favoritesQueue.length > 0;
+}
+
+async function playFavoritesQueueEntry(index: number, openNowPlaying = true): Promise<boolean> {
+  const entries = Features.getPlaylistEntries();
+  if (!entries.length) return false;
+
+  startFavoritesQueueFrom(entries, index);
+  const entry = favoritesQueue[favoritesQueueIndex];
+  if (!entry) return false;
+
+  favoritesQueueTransition = true;
+  try {
+    await preparePlaybackItem(entry.itemId);
+    const idx = currentFiles.findIndex((x: any) => String(x?.id) === entry.episodeId);
+    if (idx < 0) {
+      return false;
+    }
+    forcedSeekTime = 0;
+    await playChapter(entry.itemId, idx, openNowPlaying);
+    if (lastInProgress) {
+      await renderContinueListening(lastInProgress);
+    }
+    return true;
+  } finally {
+    favoritesQueueTransition = false;
+  }
+}
+
 function isVisible(id: string): boolean {
   const node = document.getElementById(id);
   if (!node) return false;
   return node.style.display !== "none";
+}
+
+async function renderPlaylistPage() {
+  const view = el<HTMLDivElement>("playlistView");
+  const entries = Features.getPlaylistEntries();
+  const { serverUrl, username } = getSaved();
+
+  const rows: string[] = [];
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    let episodeTitle = String(entry.episodeTitle || "").trim();
+    let podcastTitle = String(entry.podcastTitle || "").trim();
+
+    if (!episodeTitle || !podcastTitle) {
+      try {
+        const item = await getItemCached(serverUrl, username, entry.itemId);
+        const episodes = Array.isArray(item?.media?.episodes)
+          ? item.media.episodes
+          : Array.isArray(item?.media?.episodeContent)
+            ? item.media.episodeContent
+            : [];
+        const ep = episodes.find((x: any) => String(x?.id) === String(entry.episodeId));
+        if (!episodeTitle) {
+          const fallbackIndex = Number(ep?.index ?? 0);
+          episodeTitle = getTrackDisplayName(ep, fallbackIndex) || tr("common.item");
+        }
+        if (!podcastTitle) {
+          podcastTitle = String(item?.media?.metadata?.title || tr("playlist.title"));
+        }
+      } catch {
+        // Keep safe fallbacks below.
+      }
+    }
+
+    const title = escapeHtml(episodeTitle || tr("common.item"));
+    const sub = escapeHtml(podcastTitle || tr("playlist.title"));
+
+    rows.push(`
+      <div class="playlist-row">
+        <div>
+          <div class="playlist-row-title">${title}</div>
+          <div class="playlist-row-sub">${sub}</div>
+        </div>
+        <div class="playlist-row-buttons">
+          <button type="button" title="${escapeHtml(tr("playlist.playEpisode"))}" data-playlist-index="${index}" data-playlist-play="${escapeHtml(entry.itemId)}" data-playlist-episode="${escapeHtml(entry.episodeId)}">▶</button>
+          <button type="button" title="${escapeHtml(tr("playlist.removeEpisode"))}" data-playlist-remove="${escapeHtml(entry.itemId)}" data-playlist-episode="${escapeHtml(entry.episodeId)}">✕</button>
+        </div>
+      </div>
+    `);
+  }
+
+  const rowsHtml = rows.join("");
+
+  view.innerHTML = `
+    <div class="card playlist-card">
+      <div class="playlist-header">
+        <button id="playlistBackBtn" type="button">← ${tr("common.back")}</button>
+        <h2>${tr("playlist.title")}</h2>
+        <div class="playlist-actions">
+          <button id="playlistPlayAllBtn" type="button">▶ ${tr("playlist.playAll")}</button>
+          <button id="playlistClearBtn" type="button">${tr("playlist.clear")}</button>
+        </div>
+      </div>
+      <div class="playlist-list">
+        ${rowsHtml || `<div class="playlist-empty">${tr("playlist.emptyView")}</div>`}
+      </div>
+    </div>
+  `;
 }
 
 function renderSettingsPage() {
@@ -1219,8 +1639,9 @@ function formatTotalDuration(sec: number) {
 function highlightChapter(index: number) {
 
   currentChapterRows.forEach((row, i) => {
+    const rowIndex = Number(row.dataset.chapterIndex ?? i);
 
-    if (i === index) {
+    if (rowIndex === index) {
 
       row.style.background =
       "rgba(255,255,255,0.08)"
@@ -1234,6 +1655,28 @@ function highlightChapter(index: number) {
     }
 
   })
+}
+
+function clearSearchFocusedChapter() {
+  if (!searchFocusedChapterRow) return;
+  searchFocusedChapterRow.classList.remove("chapter-row-search-focus");
+  searchFocusedChapterRow = null;
+}
+
+function focusDetailChapterRow(index: number) {
+  const row = currentChapterRows.find((candidate, i) => {
+    const rowIndex = Number(candidate.dataset.chapterIndex ?? i);
+    return rowIndex === index;
+  });
+  if (!row) return;
+
+  clearSearchFocusedChapter();
+  row.classList.add("chapter-row-search-focus");
+  searchFocusedChapterRow = row;
+
+  requestAnimationFrame(() => {
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
 }
 
 function fmtTime(sec:number){
@@ -1341,6 +1784,25 @@ function openNowPlayingPanel() {
   const audio = el<HTMLAudioElement>("player");
   syncNowPlayingProgress(audio);
   setPlaybackButtons(!audio.paused);
+  
+  // Initialize button texts based on current settings
+  const speedBtn = document.getElementById("npSpeedBtn");
+  if (speedBtn) {
+    speedBtn.textContent = "⏯ x" + appSettings.playbackRate.toFixed(2);
+  }
+  
+  const sleepLabels = [
+    tr("playback.sleepTimer.off"),
+    tr("playback.sleepTimer.episode"),
+    tr("playback.sleepTimer.minutes")
+  ];
+  const sleepModes = ["none", "episode", "minutes"];
+  const sleepIdx = sleepModes.indexOf(appSettings.sleepTimerMode);
+  const sleepBtn = document.getElementById("npSleepBtn");
+  if (sleepBtn) {
+    sleepBtn.textContent = "⏱ " + sleepLabels[sleepIdx];
+    sleepBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
+  }
 }
 
 function showMiniPlayer(title:string, author:string, cover:string){
@@ -1369,6 +1831,25 @@ function showMiniPlayer(title:string, author:string, cover:string){
 
   const npBg = document.getElementById("npBg") as HTMLDivElement | null
   if (npBg) npBg.style.backgroundImage = `url('${resolvedCover.replace(/'/g, "\\'")}'` + ")"
+
+  // Initialize mini-player extra controls
+  const miniSpeedBtn = document.getElementById("miniSpeedBtn");
+  if (miniSpeedBtn) {
+    miniSpeedBtn.textContent = "⏯ x" + appSettings.playbackRate.toFixed(2);
+  }
+  
+  const sleepLabels = [
+    tr("playback.sleepTimer.off"),
+    tr("playback.sleepTimer.episode"),
+    tr("playback.sleepTimer.minutes")
+  ];
+  const sleepModes = ["none", "episode", "minutes"];
+  const sleepIdx = sleepModes.indexOf(appSettings.sleepTimerMode);
+  const miniSleepBtn = document.getElementById("miniSleepBtn");
+  if (miniSleepBtn) {
+    miniSleepBtn.textContent = "⏱ " + sleepLabels[sleepIdx];
+    miniSleepBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
+  }
 }
 
 function setMsg(id: string, text: string, type: "ok" | "error" | "none" = "none") {
@@ -1486,6 +1967,17 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
+  const playlistView = document.getElementById("playlistView");
+  if (
+    isVisible("playlistView") &&
+    playlistView &&
+    playlistView.contains(t) &&
+    !t.closest(".playlist-card")
+  ) {
+    hidePlaylistPage();
+    return;
+  }
+
   if (!t.closest(".app-popup-menu, .app-menu-btn, .chapter-menu-btn")) {
     closePopupMenus();
   }
@@ -1500,16 +1992,89 @@ document.addEventListener("click", async (e) => {
     if (isVisible("itemDetailView")) {
       await backFromDetail();
     }
+    if (isVisible("playlistView") && id !== "playlistBtn") {
+      hidePlaylistPage();
+    }
   }
   try {
+    const playlistPlayBtn = t.closest("[data-playlist-play]") as HTMLElement | null;
+    if (playlistPlayBtn) {
+      const indexRaw = Number(playlistPlayBtn.getAttribute("data-playlist-index") || "0");
+      const played = await playFavoritesQueueEntry(Number.isFinite(indexRaw) ? indexRaw : 0, true);
+      if (!played) {
+        const itemId = String(playlistPlayBtn.getAttribute("data-playlist-play") || "");
+        const episodeId = String(playlistPlayBtn.getAttribute("data-playlist-episode") || "");
+        if (itemId && episodeId) {
+          await showItemDetail(itemId, { focusEpisodeId: episodeId });
+        }
+      }
+      return;
+    }
+
+    const playlistRemoveBtn = t.closest("[data-playlist-remove]") as HTMLElement | null;
+    if (playlistRemoveBtn) {
+      const itemId = String(playlistRemoveBtn.getAttribute("data-playlist-remove") || "");
+      const episodeId = String(playlistRemoveBtn.getAttribute("data-playlist-episode") || "");
+      if (itemId && episodeId) {
+        const currentFav = getFavoritesQueueCurrentEntry();
+        Features.removeFromPlaylist(itemId, episodeId);
+        if (favoritesQueueActive) {
+          const nextEntries = Features.getPlaylistEntries().map((x) => ({
+            itemId: x.itemId,
+            episodeId: x.episodeId,
+            episodeTitle: x.episodeTitle,
+            podcastTitle: x.podcastTitle,
+          }));
+          if (!nextEntries.length) {
+            stopFavoritesQueue();
+          } else if (currentFav) {
+            const keepIndex = nextEntries.findIndex((x) =>
+              String(x.itemId) === String(currentFav.itemId) && String(x.episodeId) === String(currentFav.episodeId)
+            );
+            if (keepIndex >= 0) {
+              startFavoritesQueueFrom(nextEntries, keepIndex);
+            } else {
+              startFavoritesQueueFrom(nextEntries, Math.min(favoritesQueueIndex, nextEntries.length - 1));
+            }
+          }
+        }
+        await renderPlaylist();
+      }
+      return;
+    }
+
     if (id === "loginBtn") await handleLogin();
     if (id === "logoutBtn") await handleLogout();
+    if (id === "playlistBtn") {
+      const isPodcastLibrary = String(currentLibraryMediaType || "").toLowerCase() === "podcast";
+      if (!isPodcastLibrary) return;
+      if (isVisible("playlistView")) {
+        hidePlaylistPage();
+        return;
+      }
+      showPlaylistPage();
+      return;
+    }
     if (id === "settingsBtn") {
       if (isVisible("settingsView")) {
         hideSettingsPage();
         return;
       }
       showSettingsPage();
+      return;
+    }
+    if (id === "playlistBackBtn") {
+      hidePlaylistPage();
+      return;
+    }
+    if (id === "playlistClearBtn") {
+      Features.clearPlaylist();
+      stopFavoritesQueue();
+      await renderPlaylist();
+      return;
+    }
+    if (id === "playlistPlayAllBtn") {
+      await playFavoritesQueueEntry(0, true);
       return;
     }
     if (id === "settingsBackBtn") hideSettingsPage();
@@ -1550,6 +2115,11 @@ document.addEventListener("click", async (e) => {
         seekSeconds: Math.max(5, Math.min(120, isFinite(seekRaw) ? seekRaw : appSettings.seekSeconds)),
         continueAnimations,
         showAuthor,
+        playbackRate: appSettings.playbackRate,
+        sleepTimerMode: appSettings.sleepTimerMode,
+        sleepTimerMinutes: appSettings.sleepTimerMinutes,
+        autoMarkPlayedOnFinish: appSettings.autoMarkPlayedOnFinish,
+        usePlaylistOverlay: appSettings.usePlaylistOverlay,
       };
 
       saveSettings(next);
@@ -1683,6 +2253,50 @@ document.addEventListener("click", async (e) => {
       }
     }
 
+    if (id === "npSpeedBtn" || id === "miniSpeedBtn") {
+      const audio = document.getElementById("player") as HTMLAudioElement | null;
+      if (!audio) return;
+      const rates = [0.75, 1.0, 1.25, 1.5, 2.0];
+      const currentIdx = rates.indexOf(appSettings.playbackRate);
+      const nextIdx = (currentIdx + 1) % rates.length;
+      const newRate = rates[nextIdx];
+      appSettings.playbackRate = newRate;
+      saveSettings(appSettings);
+      audio.playbackRate = newRate;
+      const npBtn = document.getElementById("npSpeedBtn");
+      if (npBtn) npBtn.textContent = "⏯ x" + newRate.toFixed(2);
+      const miniBtn = document.getElementById("miniSpeedBtn");
+      if (miniBtn) miniBtn.textContent = "⏯ x" + newRate.toFixed(2);
+    }
+
+    if (id === "npSleepBtn" || id === "miniSleepBtn") {
+      const modes = ["none", "episode", "minutes"];
+      const labels = [
+        tr("playback.sleepTimer.off"),
+        tr("playback.sleepTimer.episode"),
+        tr("playback.sleepTimer.minutes")
+      ];
+      const currentIdx = modes.indexOf(appSettings.sleepTimerMode);
+      const nextIdx = (currentIdx + 1) % modes.length;
+      appSettings.sleepTimerMode = modes[nextIdx] as any;
+      saveSettings(appSettings);
+      
+      const npBtn = document.getElementById("npSleepBtn");
+      if (npBtn) {
+        npBtn.textContent = "⏱ " + labels[nextIdx];
+        npBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
+      }
+      
+      const miniBtn = document.getElementById("miniSleepBtn");
+      if (miniBtn) {
+        miniBtn.textContent = "⏱ " + labels[nextIdx];
+        miniBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
+      }
+      
+      // Show a quick toast or update (can evolve UI later)
+      console.log(`Sleep timer: ${labels[nextIdx]}`);
+    }
+
     if (id === "miniNextChapter" && currentItemId) {
 
       const next = currentChapterIndex + 1
@@ -1756,6 +2370,7 @@ async function backFromDetail() {
   // Show library immediately — don't block on network calls
   setContinueVisible(true);
   show(el("itemDetailView"), false);
+  show(el("playlistView"), false);
   show(el("libraryItemsView"), true);
 
   // Save/stop only when playback actually started to avoid false continue entries.
@@ -1770,6 +2385,11 @@ async function backFromDetail() {
 function setContinueVisible(showIt: boolean) {
   const section = document.getElementById("continueSection");
   if (section) section.style.display = showIt ? "" : "none";
+  const nextSection = document.getElementById("playNextSection");
+  if (nextSection) {
+    const isPodcastLibrary = String(currentLibraryMediaType || "").toLowerCase() === "podcast";
+    nextSection.style.display = showIt && isPodcastLibrary ? "" : "none";
+  }
 }
 
 /* ---------------- Progress helpers ---------------- */
@@ -1821,6 +2441,114 @@ function getEpisodeIdForProgress(p: any): string | null {
 
 function getTrackDisplayName(entry: any, index: number): string {
   return entry?.title || entry?.metadata?.title || entry?.filename || `Track ${index + 1}`;
+}
+
+function getPodcastEpisodePublishedAtTs(entry: any): number {
+  const raw =
+    entry?.publishedAt ??
+    entry?.pubDate ??
+    entry?.releaseDate ??
+    entry?.createdAt ??
+    entry?.addedAt ??
+    entry?.audioFile?.publishedAt ??
+    entry?.audioFile?.addedAt ??
+    null;
+
+  if (typeof raw === "number" && isFinite(raw)) return raw;
+  if (typeof raw === "string" && raw.trim()) {
+    const parsed = Date.parse(raw);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function getPodcastEpisodeOrderNumber(entry: any): number | null {
+  const text = String(
+    entry?.title ??
+    entry?.metadata?.title ??
+    entry?.name ??
+    entry?.filename ??
+    ""
+  );
+  if (!text) return null;
+
+  // Prefer trailing episode-like number, e.g. "Episode 57" or "Del 2".
+  const m = text.match(/(\d+)(?!.*\d)/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getPodcastPlaybackSequence(files: any[]): Array<{ file: any; index: number }> {
+  const entries = files.map((file, index) => ({
+    file,
+    index,
+    ts: getPodcastEpisodePublishedAtTs(file),
+    orderNo: getPodcastEpisodeOrderNumber(file),
+  }));
+
+  const hasPublishDates = entries.some((e) => e.ts > 0);
+  if (hasPublishDates) {
+    entries.sort((a, b) => {
+      if (a.ts !== b.ts) return a.ts - b.ts;
+      return a.index - b.index;
+    });
+    return entries.map(({ file, index }) => ({ file, index }));
+  }
+
+  const numbered = entries.filter((e) => e.orderNo !== null);
+  if (numbered.length >= Math.min(3, Math.max(1, Math.floor(files.length / 3)))) {
+    entries.sort((a, b) => {
+      const an = a.orderNo;
+      const bn = b.orderNo;
+      if (an !== null && bn !== null && an !== bn) return an - bn;
+      if (an !== null && bn === null) return -1;
+      if (an === null && bn !== null) return 1;
+      return a.index - b.index;
+    });
+    return entries.map(({ file, index }) => ({ file, index }));
+  }
+
+  // Fallback: many feeds are newest-first; reverse for forward listening order.
+  entries.sort((a, b) => b.index - a.index);
+  return entries.map(({ file, index }) => ({ file, index }));
+}
+
+async function getPodcastFinishedEpisodeIds(
+  serverUrl: string,
+  username: string,
+  itemId: string,
+  episodeIds: string[]
+): Promise<Set<string>> {
+  const cacheKey = `${serverUrl}::${username}::${itemId}`;
+  const cached = podcastEpisodeFinishedCache.get(cacheKey);
+  if (cached && (Date.now() - cached.ts) < PODCAST_EPISODE_PROGRESS_CACHE_MS) {
+    return new Set(cached.finishedIds);
+  }
+
+  const uniqueIds = Array.from(new Set(episodeIds.filter(Boolean)));
+  const finished = new Set<string>();
+  const concurrency = 6;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < uniqueIds.length) {
+      const idx = cursor++;
+      const episodeId = uniqueIds[idx];
+      try {
+        const p = await invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId });
+        if (isFinishedProgress(p)) finished.add(episodeId);
+      } catch {
+        // Ignore per-episode failures; we still render what we can.
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, uniqueIds.length) }, () => worker());
+  await Promise.all(workers);
+
+  podcastEpisodeFinishedCache.set(cacheKey, { ts: Date.now(), finishedIds: new Set(finished) });
+  return finished;
 }
 
 function progressKey(itemId: string, episodeId?: string | null): string {
@@ -1937,6 +2665,7 @@ function scheduleContinueRefresh(delay = 120) {
       const { serverUrl, username } = getSaved();
       lastInProgress = await invoke<any>("abs_get_items_in_progress", { serverUrl, username });
       await renderContinueListening(lastInProgress);
+      await renderPlaylist();
     } catch (e) {
       console.log("continue refresh fail", e);
     } finally {
@@ -1962,6 +2691,10 @@ function removeContinueCard(itemId: string, episodeId?: string | null) {
 }
 
 async function preparePlaybackItem(itemId: string) {
+  if (!favoritesQueueTransition && favoritesQueueActive) {
+    stopFavoritesQueue();
+  }
+
   const { serverUrl, username } = getSaved();
   currentItemId = itemId;
 
@@ -2041,6 +2774,13 @@ async function loadHome() {
   // Render continue listening med filter per bibliotek
   await renderLibraries(libraries);
   // await renderContinueListening(lastInProgress);
+
+  // Pre-warm global search index in background to speed up first search interaction.
+  if (!searchIndexReady && !searchIndexLoadPromise) {
+    void ensureSearchIndexLoaded().catch((e) => {
+      console.log("search pre-warm failed", e);
+    });
+  }
 }
 
 /* ---------------- Libraries ---------------- */
@@ -2080,6 +2820,7 @@ async function renderLibraries(libraries: any) {
 
       // Uppdatera continue-lista med filtrering per bibliotek
       await renderContinueListening(lastInProgress);
+      await renderPlaylist();
     } finally {
       grid.classList.remove("loading");
     }
@@ -2210,6 +2951,19 @@ function getBestProgressPercentFromInProgress(inProgressObj: any): number {
   return 0;
 }
 
+function getFavoritesQueueCurrentEntry() {
+  if (!favoritesQueueActive) return null;
+  if (favoritesQueueIndex < 0 || favoritesQueueIndex >= favoritesQueue.length) return null;
+  return favoritesQueue[favoritesQueueIndex] || null;
+}
+
+function getFavoritesQueueNextEntry() {
+  if (!favoritesQueueActive) return null;
+  const nextIndex = favoritesQueueIndex + 1;
+  if (nextIndex < 0 || nextIndex >= favoritesQueue.length) return null;
+  return favoritesQueue[nextIndex] || null;
+}
+
 /* ---------------- Continue Listening ---------------- */
 // Shared ticker for continue cards to reduce timer overhead on Wayland/NVIDIA.
 const continueCardMetaByKey = new Map<string, { itemId: string; duration: number; bar: HTMLDivElement }>();
@@ -2246,8 +3000,15 @@ async function renderContinueListening(inProgress: any) {
 
   const listEl = el("continueList");
   const emptyEl = el("continueEmpty");
+  const isPodcastLibrary = String(currentLibraryMediaType || "").toLowerCase() === "podcast";
+  const playNextSection = document.getElementById("playNextSection");
+  if (playNextSection) playNextSection.style.display = isPodcastLibrary ? "" : "none";
+  const playNextListEl = el("playNextList");
+  const playNextEmptyEl = el("playNextEmpty");
   listEl.innerHTML = "";
   emptyEl.style.display = "none";
+  if (playNextListEl) playNextListEl.innerHTML = "";
+  if (playNextEmptyEl) playNextEmptyEl.style.display = "none";
 
   continueCardMetaByKey.clear();
 
@@ -2290,6 +3051,7 @@ async function renderContinueListening(inProgress: any) {
 
   if (!filteredProgress.length) {
     emptyEl.style.display = "";
+    if (playNextEmptyEl) playNextEmptyEl.style.display = "";
     return;
   }
 
@@ -2308,6 +3070,12 @@ async function renderContinueListening(inProgress: any) {
     if (!itemId) continue;
     const episodeId = getEpisodeIdForProgress(p);
     const pKey = progressKey(itemId, episodeId);
+    const currentFav = getFavoritesQueueCurrentEntry();
+    const isFavoritesCurrent = Boolean(
+      currentFav &&
+      String(currentFav.itemId) === String(itemId) &&
+      String(currentFav.episodeId) === String(episodeId || "")
+    );
 
     const card = document.createElement("div");
     card.className = "book-card continue-card";
@@ -2323,6 +3091,7 @@ async function renderContinueListening(inProgress: any) {
     <div class="cover-wrap">
     <img class="book-cover-bg" loading="lazy" decoding="async" alt="" aria-hidden="true">
     <img class="book-cover" loading="lazy" decoding="async">
+    ${isFavoritesCurrent ? `<span class="favorite-cover-badge" title="${escapeHtml(tr("playlist.queueBadge"))}">♥</span>` : ""}
     <div class="progress-wrap">
     <div class="progress-bar"></div>
     </div>
@@ -2534,6 +3303,192 @@ async function renderContinueListening(inProgress: any) {
   }
 
   startContinueTicker();
+
+  if (isPodcastLibrary && playNextListEl && playNextEmptyEl) {
+    await renderPlayNextRow(filteredProgress, playNextListEl, playNextEmptyEl, libraryItemById);
+  }
+}
+
+async function renderPlayNextRow(
+  filteredProgress: any[],
+  listEl: HTMLElement,
+  emptyEl: HTMLElement,
+  libraryItemById: Map<string, any>
+) {
+  listEl.innerHTML = "";
+  emptyEl.style.display = "none";
+
+  const { serverUrl, username } = getSaved();
+
+  const favNext = getFavoritesQueueNextEntry();
+  if (favNext) {
+    const card = document.createElement("div");
+    card.className = "book-card continue-card play-next-card";
+    card.innerHTML = `
+      <div class="cover-wrap">
+        <img class="book-cover-bg" loading="lazy" decoding="async" alt="" aria-hidden="true">
+        <img class="book-cover" loading="lazy" decoding="async">
+        <span class="favorite-cover-badge" title="${escapeHtml(tr("playlist.queueBadge"))}">♥</span>
+        <button class="continue-play-btn" type="button" title="${escapeHtml(tr("playlist.playEpisode"))}">▶</button>
+      </div>
+      <div class="book-meta">
+        <p class="book-title">${escapeHtml(favNext.episodeTitle || tr("common.item"))}</p>
+        <p class="book-sub">${escapeHtml(favNext.podcastTitle || tr("playlist.title"))}</p>
+      </div>
+    `;
+
+    const playBtn = card.querySelector(".continue-play-btn") as HTMLButtonElement;
+    const img = card.querySelector(".book-cover") as HTMLImageElement;
+    const bgImg = card.querySelector(".book-cover-bg") as HTMLImageElement;
+
+    try {
+      const coverUrl = await invoke<string>("abs_get_cover_url", { serverUrl, username, itemId: favNext.itemId });
+      applyCardCoverWithFallback(img, bgImg, coverUrl);
+    } catch {
+      applyCardCoverWithFallback(img, bgImg, "");
+    }
+
+    playBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      await playFavoritesQueueEntry(favoritesQueueIndex + 1, true);
+    };
+
+    card.onclick = async () => {
+      await showItemDetail(favNext.itemId, { focusEpisodeId: favNext.episodeId });
+    };
+
+    listEl.appendChild(card);
+    return;
+  }
+
+  const byItemId = new Map<string, any>();
+  for (const p of filteredProgress) {
+    const itemId = getItemId(p);
+    if (!itemId) continue;
+    if (!byItemId.has(itemId)) byItemId.set(itemId, p);
+  }
+
+  const candidates = Array.from(byItemId.values());
+  if (!candidates.length) {
+    emptyEl.style.display = "";
+    return;
+  }
+
+  for (const p of candidates.slice(0, 20)) {
+    const itemId = getItemId(p);
+    if (!itemId) continue;
+
+    const card = document.createElement("div");
+    card.className = "book-card continue-card play-next-card";
+    card.innerHTML = `
+      <div class="cover-wrap">
+        <img class="book-cover-bg" loading="lazy" decoding="async" alt="" aria-hidden="true">
+        <img class="book-cover" loading="lazy" decoding="async">
+        <button class="continue-play-btn" type="button" title="${escapeHtml(tr("podcast.playNext"))}">▶</button>
+      </div>
+      <div class="book-meta">
+        <p class="book-title"></p>
+        <p class="book-sub"></p>
+      </div>
+    `;
+
+    const titleEl = card.querySelector(".book-title") as HTMLElement;
+    const subEl = card.querySelector(".book-sub") as HTMLElement;
+    const playBtn = card.querySelector(".continue-play-btn") as HTMLButtonElement;
+    const img = card.querySelector(".book-cover") as HTMLImageElement;
+    const bgImg = card.querySelector(".book-cover-bg") as HTMLImageElement;
+
+    let nextIndex = 0;
+    let nextEpisodeId: string | null = null;
+    let isPodcastItem = false;
+
+    try {
+      const item = await getItemCached(serverUrl, username, itemId);
+      const files = (
+        item?.media?.audioFiles ||
+        item?.media?.episodes ||
+        item?.media?.episodeContent ||
+        []
+      )
+        .slice()
+        .sort((a: any, b: any) => (a?.index ?? 0) - (b?.index ?? 0));
+
+      isPodcastItem = Array.isArray(item?.media?.episodes);
+      const episodeId = getEpisodeIdForProgress(p);
+
+      if (isPodcastItem) {
+        const sequence = getPodcastPlaybackSequence(files);
+        const curPos = episodeId
+          ? sequence.findIndex((x: any) => String(x?.file?.id) === String(episodeId))
+          : -1;
+        const nextPos = Math.min((curPos >= 0 ? curPos + 1 : 0), Math.max(0, sequence.length - 1));
+        const nextEpisode = sequence[nextPos]?.file;
+        nextIndex = sequence[nextPos]?.index ?? 0;
+        nextEpisodeId = nextEpisode?.id ? String(nextEpisode.id) : null;
+        titleEl.textContent = getTrackDisplayName(nextEpisode, nextIndex);
+        subEl.textContent = item?.media?.metadata?.title || "";
+      } else {
+        // Play Next row is podcast-only.
+        continue;
+      }
+    } catch {
+      titleEl.textContent = libraryItemById.get(itemId)?.media?.metadata?.title || itemId;
+      subEl.textContent = "";
+    }
+
+    if (!isPodcastItem) {
+      continue;
+    }
+
+    try {
+      const coverUrl = await invoke<string>("abs_get_cover_url", { serverUrl, username, itemId });
+      applyCardCoverWithFallback(img, bgImg, coverUrl);
+    } catch {
+      applyCardCoverWithFallback(img, bgImg, "");
+    }
+
+    playBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      await preparePlaybackItem(itemId);
+      if (nextEpisodeId) {
+        const idx = currentFiles.findIndex((x: any) => String(x?.id) === nextEpisodeId);
+        if (idx >= 0) {
+          await playChapter(itemId, idx, true);
+          return;
+        }
+      }
+      await playChapter(itemId, nextIndex, true);
+    };
+
+    card.onclick = async () => {
+      await showItemDetail(itemId, {
+        focusEpisodeId: nextEpisodeId,
+        focusEpisodeIndex: nextIndex,
+      });
+    };
+
+    listEl.appendChild(card);
+  }
+}
+
+async function renderPlaylist() {
+  Features.loadPlaylist();
+  const entries = Features.getPlaylistEntries();
+  const isPodcastLibrary = String(currentLibraryMediaType || "").toLowerCase() === "podcast";
+  const playlistBtn = document.getElementById("playlistBtn");
+  if (playlistBtn) {
+    (playlistBtn as HTMLElement).style.display = isPodcastLibrary ? "" : "none";
+    playlistBtn.textContent = tr("playlist.button", { count: entries.length });
+  }
+
+  if (!isPodcastLibrary && isVisible("playlistView")) {
+    hidePlaylistPage();
+    return;
+  }
+
+  if (isVisible("playlistView")) {
+    void renderPlaylistPage();
+  }
 }
 
 /* ---------------- Library grid ---------------- */
@@ -2785,16 +3740,22 @@ async function renderLibraryGrid() {
 }
 
 /* ---------------- Detail / audio ---------------- */
-async function showItemDetail(itemId: string) {
+async function showItemDetail(itemId: string, opts?: { focusEpisodeId?: string | null; focusEpisodeIndex?: number | null }) {
   setContinueVisible(false);
   const { serverUrl, username } = getSaved();
   currentItemId = itemId;
+  clearSearchFocusedChapter();
 
   show(el("libraryItemsView"), false);
+  show(el("settingsView"), false);
+  show(el("playlistView"), false);
   show(el("itemDetailView"), true);
 
   const item = await getItemCached(serverUrl, username, itemId, true);
-  const isPodcastItem = Array.isArray(item?.media?.episodes);
+  const isPodcastItem =
+    Array.isArray(item?.media?.episodes) ||
+    Array.isArray(item?.media?.episodeContent) ||
+    String(item?.mediaType ?? item?.library?.mediaType ?? "").toLowerCase() === "podcast";
   const title = item?.media?.metadata?.title ?? tr("common.item");
   const author = item?.media?.metadata?.authorName ?? "";
   const desc = item?.media?.metadata?.description ?? "";
@@ -2830,8 +3791,11 @@ async function showItemDetail(itemId: string) {
   <button id="resumeBtn">${playLabel}</button>
   <button id="detailMarkPlayedBtn">✓ ${tr("menu.markPlayed")}</button>
   ${(currentItemFinished || startAt > 0) ? `<button id="detailMarkUnplayedBtn">↻ ${tr("menu.resetUnplayed")}</button>` : `<button id="detailMarkUnplayedBtn" style="display:none">↻ ${tr("menu.resetUnplayed")}</button>`}
+  ${isPodcastItem ? `<button id="detailPlayNextBtn">▶ ${tr("podcast.playNext")}</button>` : ""}
   <button id="detailDownloadOfflineBtn">↓ ${tr("menu.downloadOffline")}</button>
   <button id="detailRemoveOfflineBtn" style="display:none">🗑 ${tr("menu.removeOffline")}</button>
+  ${isPodcastItem ? `<label class="detail-sort-control" for="detailPodcastFilter"><span>${tr("podcast.filter.label")}</span><select id="detailPodcastFilter"><option value="all" ${detailPodcastFilterMode === "all" ? "selected" : ""}>${tr("podcast.filter.all")}</option><option value="unplayed" ${detailPodcastFilterMode === "unplayed" ? "selected" : ""}>${tr("podcast.filter.unplayed")}</option><option value="downloaded" ${detailPodcastFilterMode === "downloaded" ? "selected" : ""}>${tr("podcast.filter.downloaded")}</option></select></label>` : ""}
+  ${isPodcastItem ? `<label class="detail-sort-control" for="detailPodcastSort"><span>${tr("podcast.sort.label")}</span><select id="detailPodcastSort"><option value="oldest" ${detailPodcastSortMode === "oldest" ? "selected" : ""}>${tr("podcast.sort.oldest")}</option><option value="latest" ${detailPodcastSortMode === "latest" ? "selected" : ""}>${tr("podcast.sort.latest")}</option><option value="name" ${detailPodcastSortMode === "name" ? "selected" : ""}>${tr("podcast.sort.name")}</option></select></label>` : ""}
   <span id="detailOfflineProgress" style="display:none"></span>
   </div>
 
@@ -2888,6 +3852,70 @@ async function showItemDetail(itemId: string) {
   .sort((a: any, b: any) => (a?.index ?? 0) - (b?.index ?? 0));
 
   currentFiles = files;
+
+  const displayEntries = currentFiles.map((file, canonicalIndex) => ({ file, canonicalIndex }));
+  if (isPodcastItem) {
+    const hasAnyPublishedTs = displayEntries.some((entry) => getPodcastEpisodePublishedAtTs(entry.file) > 0);
+
+    if (detailPodcastSortMode === "latest") {
+      if (hasAnyPublishedTs) {
+        displayEntries.sort((a, b) => {
+          const ta = getPodcastEpisodePublishedAtTs(a.file);
+          const tb = getPodcastEpisodePublishedAtTs(b.file);
+          if (tb !== ta) return tb - ta;
+          return a.canonicalIndex - b.canonicalIndex;
+        });
+      } else {
+        // Most podcast feeds are naturally newest-first.
+        displayEntries.sort((a, b) => a.canonicalIndex - b.canonicalIndex);
+      }
+    } else if (detailPodcastSortMode === "oldest") {
+      if (hasAnyPublishedTs) {
+        displayEntries.sort((a, b) => {
+          const ta = getPodcastEpisodePublishedAtTs(a.file);
+          const tb = getPodcastEpisodePublishedAtTs(b.file);
+          if (ta !== tb) return ta - tb;
+          return a.canonicalIndex - b.canonicalIndex;
+        });
+      } else {
+        // Without publish dates, invert feed order so oldest appears first.
+        displayEntries.sort((a, b) => b.canonicalIndex - a.canonicalIndex);
+      }
+    } else if (detailPodcastSortMode === "name") {
+      const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+      displayEntries.sort((a, b) =>
+        collator.compare(
+          getTrackDisplayName(a.file, a.canonicalIndex),
+          getTrackDisplayName(b.file, b.canonicalIndex)
+        )
+      );
+    }
+  }
+
+  const offlineItemStatus = await getOfflineItemStatus(itemId);
+  const downloadedEpisodeIds = isPodcastItem
+    ? await getOfflineEpisodeIds(itemId)
+    : new Set<string>();
+  const finishedEpisodeIds = isPodcastItem
+    ? await getPodcastFinishedEpisodeIds(
+      serverUrl,
+      username,
+      itemId,
+      displayEntries.map((e) => e.file?.id ? String(e.file.id) : "")
+    )
+    : new Set<string>();
+
+  if (isPodcastItem && detailPodcastFilterMode !== "all") {
+    const filtered = displayEntries.filter((entry) => {
+      const episodeId = entry.file?.id ? String(entry.file.id) : "";
+      if (!episodeId) return detailPodcastFilterMode !== "downloaded";
+      if (detailPodcastFilterMode === "downloaded") return downloadedEpisodeIds.has(episodeId);
+      if (detailPodcastFilterMode === "unplayed") return !finishedEpisodeIds.has(episodeId);
+      return true;
+    });
+    displayEntries.length = 0;
+    displayEntries.push(...filtered);
+  }
   
   // 🔥 PREBUFFER RESUME CHAPTER
 
@@ -2923,12 +3951,16 @@ async function showItemDetail(itemId: string) {
 
   const list = document.createElement("div");
   const chapterRows: HTMLElement[] = []
+  const chapterEpisodeIds: (string | null)[] = [];
   list.style.marginTop = "18px";
 
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
+  for (const entry of displayEntries) {
+    const f = entry.file;
+    const canonicalIndex = entry.canonicalIndex;
 
     const row = document.createElement("div");
+    row.classList.add("detail-chapter-row");
+    row.dataset.chapterIndex = String(canonicalIndex);
     chapterRows.push(row)
     row.style.display = "flex";
     row.style.justifyContent = "space-between";
@@ -2936,7 +3968,20 @@ async function showItemDetail(itemId: string) {
     row.style.borderBottom = "1px solid rgba(255,255,255,.05)";
 
     const left = document.createElement("div");
-    left.textContent = getTrackDisplayName(f, i);
+    left.style.display = "flex";
+    left.style.alignItems = "center";
+    left.style.gap = "8px";
+
+    const titleEl = document.createElement("span");
+    titleEl.textContent = getTrackDisplayName(f, canonicalIndex);
+
+    const rowFavBtn = document.createElement("button");
+    rowFavBtn.type = "button";
+    rowFavBtn.className = "chapter-fav-btn";
+    rowFavBtn.title = tr("playlist.add");
+    rowFavBtn.textContent = "♡";
+
+    left.append(rowFavBtn, titleEl);
 
     // Handle both audiobook files (duration) and podcast episodes (audioFile.duration)
     const episodeDuration = f?.duration || f?.audioFile?.duration || f?.audioLength || 0;
@@ -2963,6 +4008,10 @@ async function showItemDetail(itemId: string) {
     done.style.fontWeight = "800";
     done.style.fontSize = "13px";
 
+    const offlineDot = document.createElement("span");
+    offlineDot.className = "chapter-offline-dot";
+    offlineDot.title = tr("menu.downloadOffline");
+
     const rowMenuBtn = document.createElement("button");
     rowMenuBtn.type = "button";
     rowMenuBtn.textContent = "⋯";
@@ -2985,7 +4034,11 @@ async function showItemDetail(itemId: string) {
     rowReset.className = "app-popup-action";
     rowReset.style.display = "none";
 
-    rowMenu.append(rowMarkPlayed, rowReset);
+    const rowOfflineBtn = document.createElement("button");
+    rowOfflineBtn.type = "button";
+    rowOfflineBtn.className = "app-popup-action";
+
+    rowMenu.append(rowMarkPlayed, rowReset, rowOfflineBtn);
 
     row.style.position = "relative";
 
@@ -2994,10 +4047,28 @@ async function showItemDetail(itemId: string) {
       togglePopupMenu(rowMenu);
     };
 
-    if (isPodcastItem && f?.id) {
-      const episodeId = String(f.id);
+    const episodeId = f?.id ? String(f.id) : null;
+    chapterEpisodeIds[canonicalIndex] = episodeId;
+    let episodeOfflineAvailable = Boolean(episodeId && downloadedEpisodeIds.has(episodeId));
+    if (!isPodcastItem && offlineItemStatus.exists) {
+      episodeOfflineAvailable = true;
+    }
+    offlineDot.style.display = episodeOfflineAvailable ? "inline-flex" : "none";
+    rowOfflineBtn.textContent = episodeOfflineAvailable
+      ? tr("menu.removeEpisodeOffline")
+      : tr("menu.downloadEpisodeOffline");
+
+    if (episodeId && finishedEpisodeIds.has(episodeId)) {
+      done.style.display = "flex";
+      rowReset.style.display = "";
+    }
+
+    if (isPodcastItem && episodeId) {
       invoke<any>("abs_get_progress", { serverUrl, username, itemId, episodeId }).then((epProgress) => {
-        if (isFinishedProgress(epProgress)) done.style.display = "flex";
+        if (isFinishedProgress(epProgress)) {
+          done.style.display = "flex";
+          finishedEpisodeIds.add(episodeId);
+        }
         if (epProgress && (isFinishedProgress(epProgress) || (epProgress.currentTime ?? 0) > 0 || (epProgress.progress ?? 0) > 0)) {
           rowReset.style.display = "";
         }
@@ -3007,6 +4078,7 @@ async function showItemDetail(itemId: string) {
         ev.stopPropagation();
         await invoke("abs_mark_played", { serverUrl, username, itemId, episodeId });
         done.style.display = "flex";
+        finishedEpisodeIds.add(episodeId);
         rowMenu.style.display = "none";
         queuePodcastLibraryDoneState(String(itemId));
         scheduleContinueRefresh(0);
@@ -3017,16 +4089,68 @@ async function showItemDetail(itemId: string) {
         ev.stopPropagation();
         await invoke("abs_mark_unplayed", { serverUrl, username, itemId, episodeId });
         done.style.display = "none";
+        finishedEpisodeIds.delete(episodeId);
         rowMenu.style.display = "none";
         queuePodcastLibraryDoneState(String(itemId));
         scheduleContinueRefresh(0);
       };
+
+      rowOfflineBtn.onclick = async (ev) => {
+        ev.stopPropagation();
+        rowOfflineBtn.disabled = true;
+        try {
+          if (episodeOfflineAvailable) {
+            await removeOfflineEpisode(itemId, episodeId);
+            episodeOfflineAvailable = false;
+          } else {
+            await downloadOfflineEpisode(itemId, episodeId);
+            episodeOfflineAvailable = true;
+          }
+          rowOfflineBtn.textContent = episodeOfflineAvailable
+            ? tr("menu.removeEpisodeOffline")
+            : tr("menu.downloadEpisodeOffline");
+          offlineDot.style.display = episodeOfflineAvailable ? "inline-flex" : "none";
+        } catch (err) {
+          console.log("episode offline toggle fail", err);
+        } finally {
+          rowOfflineBtn.disabled = false;
+          rowMenu.style.display = "none";
+        }
+      };
+
+      rowFavBtn.onclick = async (ev: Event) => {
+        ev.stopPropagation();
+        if (!currentItemId || !episodeId) return;
+        const isInPlaylist = Features.isInPlaylist(currentItemId, episodeId);
+        if (isInPlaylist) {
+          Features.removeFromPlaylist(currentItemId, episodeId);
+          rowFavBtn.textContent = "♡";
+          rowFavBtn.title = tr("playlist.add");
+        } else {
+          Features.addToPlaylist({
+            itemId: currentItemId,
+            episodeId,
+            episodeTitle: String(f?.title || episodeId),
+            podcastTitle: String(item?.media?.metadata?.title || ""),
+          });
+          rowFavBtn.textContent = "♥";
+          rowFavBtn.title = tr("playlist.remove");
+        }
+        await renderPlaylist();
+      };
+
+      // Set initial text
+      const isInPlaylist = Features.isInPlaylist(currentItemId, episodeId);
+      rowFavBtn.textContent = isInPlaylist ? "♥" : "♡";
+      rowFavBtn.title = isInPlaylist ? tr("playlist.remove") : tr("playlist.add");
     } else {
       rowMenuBtn.style.display = "none";
       rowMenu.style.display = "none";
+      rowOfflineBtn.style.display = "none";
+      rowFavBtn.style.display = "none";
     }
 
-    right.append(durEl, done, rowMenuBtn);
+    right.append(durEl, offlineDot, done, rowMenuBtn);
     row.appendChild(left);
     row.appendChild(right);
     row.appendChild(rowMenu);
@@ -3034,12 +4158,57 @@ async function showItemDetail(itemId: string) {
     row.style.cursor = "pointer";
 
     row.onclick = async () => {
-      await playChapter(itemId, i, true);
+      clearSearchFocusedChapter();
+      await playChapter(itemId, canonicalIndex, true);
     };
   }
 
   detail.querySelector(".card")?.appendChild(list);
   currentChapterRows = chapterRows
+
+  const targetEpisodeId = opts?.focusEpisodeId ? String(opts.focusEpisodeId) : null;
+  let targetIndex = typeof opts?.focusEpisodeIndex === "number" ? opts.focusEpisodeIndex : -1;
+  if (targetEpisodeId) {
+    const byId = chapterEpisodeIds.findIndex((id) => id === targetEpisodeId);
+    if (byId >= 0) targetIndex = byId;
+  }
+  if (targetIndex >= 0) {
+    focusDetailChapterRow(targetIndex);
+  }
+
+  const detailPlayNextBtn = document.getElementById("detailPlayNextBtn") as HTMLButtonElement | null;
+  if (detailPlayNextBtn) {
+    detailPlayNextBtn.onclick = async () => {
+      const next = currentItemId === itemId
+        ? Math.min(currentChapterIndex + 1, Math.max(0, currentFiles.length - 1))
+        : 0;
+      await playChapter(itemId, next, true);
+    };
+  }
+
+  const detailPodcastFilter = document.getElementById("detailPodcastFilter") as HTMLSelectElement | null;
+  if (detailPodcastFilter) {
+    detailPodcastFilter.onchange = () => {
+      const next = detailPodcastFilter.value === "downloaded" || detailPodcastFilter.value === "unplayed"
+        ? detailPodcastFilter.value
+        : "all";
+      if (next === detailPodcastFilterMode) return;
+      detailPodcastFilterMode = next;
+      void showItemDetail(itemId, opts);
+    };
+  }
+
+  const detailPodcastSort = document.getElementById("detailPodcastSort") as HTMLSelectElement | null;
+  if (detailPodcastSort) {
+    detailPodcastSort.onchange = () => {
+      const next = detailPodcastSort.value === "latest" || detailPodcastSort.value === "name"
+        ? detailPodcastSort.value
+        : "oldest";
+      if (next === detailPodcastSortMode) return;
+      detailPodcastSortMode = next;
+      void showItemDetail(itemId, opts);
+    };
+  }
 
   // ===== DETAIL VIEW MARK PLAYED/UNPLAYED BUTTONS =====
   const detailMarkPlayedBtn = el<HTMLButtonElement>("detailMarkPlayedBtn");
@@ -3080,9 +4249,7 @@ async function showItemDetail(itemId: string) {
   const detailDownloadOfflineBtn = document.getElementById("detailDownloadOfflineBtn") as HTMLButtonElement | null;
   const detailRemoveOfflineBtn = document.getElementById("detailRemoveOfflineBtn") as HTMLButtonElement | null;
 
-  void getOfflineItemStatus(itemId).then((st) => {
-    if (detailRemoveOfflineBtn) detailRemoveOfflineBtn.style.display = st.exists ? "" : "none";
-  });
+  if (detailRemoveOfflineBtn) detailRemoveOfflineBtn.style.display = offlineItemStatus.exists ? "" : "none";
 
   if (detailDownloadOfflineBtn) {
     detailDownloadOfflineBtn.onclick = async (ev) => {
@@ -3492,6 +4659,35 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
 
     audio.onended = async () => {
 
+      if (favoritesQueueActive) {
+        const nextFavIndex = favoritesQueueIndex + 1;
+        if (nextFavIndex < favoritesQueue.length) {
+          const nextFav = favoritesQueue[nextFavIndex];
+          favoritesQueueIndex = nextFavIndex;
+
+          favoritesQueueTransition = true;
+          try {
+            await preparePlaybackItem(nextFav.itemId);
+            const idx = currentFiles.findIndex((x: any) => String(x?.id) === String(nextFav.episodeId));
+            if (idx >= 0) {
+              forcedSeekTime = 0;
+              await playChapter(nextFav.itemId, idx, true);
+              return;
+            }
+            stopFavoritesQueue();
+          } finally {
+            favoritesQueueTransition = false;
+          }
+        } else {
+          stopFavoritesQueue();
+          await stopPlaybackSession();
+          if (currentItemId) {
+            await maybeAutoRemoveOfflineItem(currentItemId);
+          }
+          return;
+        }
+      }
+
       const next = currentChapterIndex + 1
 
       if (next < currentFiles.length) {
@@ -3506,6 +4702,13 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
           await maybeAutoRemoveOfflineItem(currentItemId)
         }
 
+        // NEW: Auto-mark as played when finished
+        if (appSettings.autoMarkPlayedOnFinish && currentItemId) {
+          try {
+            await updateProgressWithOfflineFallback(currentItemId, audio.duration, currentEpisodeId);
+            // Mark as finished would go here - would need server command
+          } catch (e) {}
+        }
       }
     }
 
@@ -3765,6 +4968,7 @@ async function showAppVersion() {
 
 async function boot() {
   applySettings();
+  Features.loadPlaylist();
   await syncQueuedOfflineProgress();
   window.addEventListener("online", () => {
     void syncQueuedOfflineProgress();

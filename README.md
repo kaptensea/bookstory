@@ -4,7 +4,7 @@
   <p>A native desktop client for <a href="https://www.audiobookshelf.org">Audiobookshelf</a>, built with Tauri 2, TypeScript, and Rust.</p>
 
   <a href="https://github.com/kaptensea/bookstory/releases" target="_blank">
-    <img src="https://img.shields.io/badge/version-1.2.0-blue" alt="Version" />
+    <img src="https://img.shields.io/badge/version-1.4.0-blue" alt="Version" />
   </a>
   <a href="https://opensource.org/licenses/MIT" target="_blank">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
@@ -28,15 +28,21 @@
 ## Features
 
 - **Global search bar** — search all books and podcasts with instant dropdown results and cover images
+- **Search pre-warm and race-safe rendering** — first search is indexed in background and stale query results are ignored
 - **Continue Listening** shelf with real-time progress bars synced from your server
+- **Play Next** shelf for podcasts with smart episode ordering and podcast-only visibility
 - **Library browser** — browse all your audiobooks and podcasts
 - **Item detail view** with chapter list and chapter-level playback
+- **Podcast detail controls** — episode sort/filter (All/Unplayed/Downloaded), per-episode menu actions, and inline favorite hearts
 - **Mini player** docked at the bottom with playback controls
 - **Full-screen Now Playing** view with seek slider and chapter navigation
+- **Playback speed controls** in mini player and now playing (`0.75x`, `1.00x`, `1.25x`, `1.5x`, `2.0x`)
+- **Sleep timer controls** in mini player and now playing (Off / End of episode / Minutes)
 - **Auto-open Now Playing** when playback starts (with quick minimize back to mini player)
 - **Progress sync** — listens sessions are synced back to your Audiobookshelf server
 - **Podcast episode progress** synced using episode-aware API endpoints
 - **Mark played / unplayed** in Continue Listening, Library cards, and Podcast episode rows
+- **Favorites queue** — episode-based favorites with dedicated Favorites view, play-all queue, per-episode play/remove, and queue-aware next playback
 - **Settings page** for language, default sort, default volume, seek seconds, and continue-card animations
 - **Flexible sorting** — Recently added, Oldest added, A -> Z, Z -> A (sidebar + settings default)
 - **Offline download controls** — download/remove per item from cover menu and detail view

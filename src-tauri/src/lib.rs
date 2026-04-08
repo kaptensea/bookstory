@@ -373,6 +373,204 @@ async fn abs_offline_download_item(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+async fn abs_offline_download_episode(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SharedState>,
+    server_url: String,
+    username: String,
+    item_id: String,
+    episode_id: String,
+) -> Result<(), String> {
+    let server_url = normalize_server_url(server_url);
+    let token = get_token_from_keyring(&server_url, &username)?;
+    let s = &state.0;
+
+    fs::create_dir_all(&s.offline_root).map_err(|e| format!("Failed to create offline root: {}", e))?;
+
+    let item_url = format!("{}/api/items/{}?include=progress", server_url, item_id);
+    let item_resp = reqwest::Client::new()
+        .get(item_url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !item_resp.status().is_success() {
+        return Err(format!(
+            "Failed to fetch item for offline episode download (HTTP {})",
+            item_resp.status()
+        ));
+    }
+
+    let item_json: serde_json::Value = item_resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid item response: {}", e))?;
+
+    let tracks = parse_item_tracks(&item_json);
+    let mut tr = tracks
+        .into_iter()
+        .find(|t| t.episode_id.as_deref() == Some(episode_id.as_str()))
+        .ok_or_else(|| "Episode not found for this podcast item".to_string())?;
+
+    let _ = app.emit(
+        "offline-download-progress",
+        OfflineDownloadProgressEvent {
+            item_id: item_id.clone(),
+            percent: 0,
+            status: "downloading".to_string(),
+        },
+    );
+
+    let title = item_json
+        .pointer("/media/metadata/title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Item")
+        .to_string();
+    let author = item_json
+        .pointer("/media/metadata/authorName")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let item_dir = s.offline_root.join(sanitize_name(&item_id));
+    fs::create_dir_all(&item_dir).map_err(|e| format!("Failed to create offline item dir: {}", e))?;
+
+    let file_url = format!(
+        "{}/api/items/{}/file/{}?token={}",
+        server_url, item_id, tr.ino, token
+    );
+
+    let download_resp = reqwest::Client::new()
+        .get(file_url)
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
+
+    if !download_resp.status().is_success() {
+        return Err(format!(
+            "Offline download failed for episode {} (HTTP {})",
+            episode_id,
+            download_resp.status()
+        ));
+    }
+
+    let file_name = format!("{:03}_{}.bin", tr.index, sanitize_name(&tr.ino));
+    let full_path = item_dir.join(&file_name);
+    write_response_to_file(download_resp, &full_path).await?;
+    tr.size_bytes = full_path.metadata().map(|m| m.len()).unwrap_or(0);
+    tr.relative_path = format!("{}/{}", sanitize_name(&item_id), file_name);
+
+    let mut idx = load_offline_index(&s.offline_index_path)?;
+    let entry = idx.items.entry(item_id.clone()).or_insert(OfflineItem {
+        item_id: item_id.clone(),
+        title: title.clone(),
+        author: author.clone(),
+        tracks: Vec::new(),
+        downloaded_at: now_unix_seconds(),
+    });
+
+    entry.title = title;
+    entry.author = author;
+    entry.downloaded_at = now_unix_seconds();
+
+    if let Some(existing_idx) = entry
+        .tracks
+        .iter()
+        .position(|t| t.episode_id.as_deref() == Some(episode_id.as_str()))
+    {
+        let old_rel = entry.tracks[existing_idx].relative_path.clone();
+        let old_file = s.offline_root.join(old_rel);
+        if old_file.exists() {
+            let _ = fs::remove_file(old_file);
+        }
+        entry.tracks.remove(existing_idx);
+    }
+
+    entry.tracks.push(tr);
+    entry.tracks.sort_by_key(|t| t.index);
+
+    save_offline_index(&s.offline_index_path, &idx)?;
+
+    let _ = app.emit(
+        "offline-download-progress",
+        OfflineDownloadProgressEvent {
+            item_id,
+            percent: 100,
+            status: "ready".to_string(),
+        },
+    );
+
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn abs_offline_remove_episode(
+    state: tauri::State<'_, SharedState>,
+    item_id: String,
+    episode_id: String,
+) -> Result<(), String> {
+    let s = &state.0;
+    let mut idx = load_offline_index(&s.offline_index_path)?;
+
+    let mut removed_file: Option<String> = None;
+    let mut should_remove_item = false;
+
+    if let Some(item) = idx.items.get_mut(&item_id) {
+        if let Some(track_idx) = item
+            .tracks
+            .iter()
+            .position(|t| t.episode_id.as_deref() == Some(episode_id.as_str()))
+        {
+            removed_file = Some(item.tracks[track_idx].relative_path.clone());
+            item.tracks.remove(track_idx);
+        }
+
+        should_remove_item = item.tracks.is_empty();
+    }
+
+    if should_remove_item {
+        idx.items.remove(&item_id);
+    }
+
+    save_offline_index(&s.offline_index_path, &idx)?;
+
+    if let Some(rel) = removed_file {
+        let path = s.offline_root.join(rel);
+        if path.exists() {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    if should_remove_item {
+        let dir = s.offline_root.join(sanitize_name(&item_id));
+        if dir.exists() {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn abs_offline_item_episode_ids(
+    state: tauri::State<'_, SharedState>,
+    item_id: String,
+) -> Result<Vec<String>, String> {
+    let idx = load_offline_index(&state.0.offline_index_path)?;
+    if let Some(item) = idx.items.get(&item_id) {
+        let ids = item
+            .tracks
+            .iter()
+            .filter_map(|t| t.episode_id.clone())
+            .collect::<Vec<_>>();
+        Ok(ids)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
 fn abs_offline_item_status(
     state: tauri::State<'_, SharedState>,
     item_id: String,
@@ -1851,10 +2049,13 @@ pub fn run() {
         abs_resolve_playback_url,
         abs_trigger_play,
         abs_offline_download_item,
+        abs_offline_download_episode,
         abs_offline_item_status,
+        abs_offline_item_episode_ids,
         abs_offline_stats,
         abs_offline_enforce_max_storage,
         abs_offline_remove_item,
+        abs_offline_remove_episode,
         abs_offline_remove_all,
         abs_offline_local_player_url,
         abs_offline_queue_progress,

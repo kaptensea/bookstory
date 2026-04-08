@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.4.0] - 2026-04-08
+
+### Added
+- Favorites system for podcast episodes with per-episode heart toggle directly in detail rows.
+- Dedicated Favorites view opened from the sidebar menu in podcast libraries.
+- Favorites queue playback controls:
+	- Play all favorites from the first entry,
+	- play a specific favorite row,
+	- remove individual episodes,
+	- clear queue.
+- Queue-aware playback flow: when Favorites queue is active, playback advances through favorites entries and stops when queue ends.
+- Favorites visual badges (heart) on playback cover cards to indicate queue-driven playback.
+- Playback speed controls in both mini player and now playing views.
+- Sleep timer controls in both mini player and now playing views.
+- Podcast Play Next shelf on Home with smart ordering and podcast-only visibility.
+- Podcast detail sort and filter controls (Oldest/Latest/Name and All/Unplayed/Downloaded).
+- Per-episode offline actions for podcast episodes (download/remove).
+
+### Changed
+- Playlist naming and UX refined to Favorites for episode-first workflows.
+- Favorites data model moved from item-based entries to episode-based entries.
+- Legacy playlist entries are ignored/migrated out of the active favorites queue.
+- Home rails now respect Favorites queue context so next-up behavior follows queue order instead of feed order.
+- Continue Listening and Play Next presentation improved for podcast-heavy usage.
+
+### Fixed
+- Search startup race conditions that could render stale results from older queries.
+- Natural name sorting for numbered episodes (e.g. `1, 2, 10` instead of `1, 10, 100`).
+- Play Next visibility now correctly hidden outside podcast libraries.
+- Podcast episode metadata fallback behavior improved in favorites rendering and queue playback.
+
 ## [1.3.0] - 2026-04-07
 
 ### Added
