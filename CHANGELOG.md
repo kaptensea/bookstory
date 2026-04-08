@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.4.1] - 2026-04-08
+
+### Added
+- Sleep timer: 60 min option added to the cycle (Off → Episode → 30 min → 60 min).
+
+### Fixed
+- Sleep timer now actually stops playback: minutes modes pause after the configured duration, episode mode stops at episode end without auto-advancing.
+- Sleep button and hover tooltip now correctly reflect active mode and update on language change.
+
+---
+
 ## [1.4.0] - 2026-04-08
 
 ### Added

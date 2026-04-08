@@ -327,7 +327,7 @@ type AppSettings = {
   continueAnimations: boolean;
   showAuthor: boolean;
   playbackRate: number;
-  sleepTimerMode: "none" | "episode" | "minutes";
+  sleepTimerMode: "none" | "episode" | "minutes" | "minutes60";
   sleepTimerMinutes: number;
   autoMarkPlayedOnFinish: boolean;
   usePlaylistOverlay: boolean;
@@ -470,6 +470,8 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "playback.sleepTimer.off": "Off",
     "playback.sleepTimer.episode": "End of episode",
     "playback.sleepTimer.minutes": "After {{minutes}} min",
+    "playback.sleepTimer.minutesShort": "30 min",
+    "playback.sleepTimer.minutes60Short": "60 min",
     "playback.sleepTimer.active": "Sleep timer active - stops at {{time}}",
     "playback.autoMarkPlayed": "Auto-mark as played when finished",
     "playback.stopAt": "Will stop after this episode",
@@ -594,6 +596,8 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "playback.sleepTimer.off": "Av",
     "playback.sleepTimer.episode": "Slutet av avsnittet",
     "playback.sleepTimer.minutes": "30 minuter",
+    "playback.sleepTimer.minutesShort": "30 min",
+    "playback.sleepTimer.minutes60Short": "60 min",
     "playback.sleepTimer.active": "Slumtimer aktiv",
     "playback.autoMarkPlayed": "Markera automatiskt som spelad n\u00e4r klar",
     "playlist.add": "L\u00e4gg till i spellista",
@@ -708,6 +712,8 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "playback.sleepTimer.off": "Aus",
     "playback.sleepTimer.episode": "Am Ende der Episode",
     "playback.sleepTimer.minutes": "30 Minuten",
+    "playback.sleepTimer.minutesShort": "30 Min",
+    "playback.sleepTimer.minutes60Short": "60 Min",
     "playback.sleepTimer.active": "Sleep-Timer aktiv",
     "playback.autoMarkPlayed": "Automatisch als abgespielt markieren, wenn abgeschlossen",
     "playlist.add": "Zur Playlist hinzuf\u00fcgen",
@@ -734,6 +740,47 @@ function tr(key: string, vars?: Record<string, string | number>): string {
 function setTextIfExists(id: string, value: string) {
   const n = document.getElementById(id);
   if (n) n.textContent = value;
+}
+
+function getSleepModeLabel(mode: "none" | "episode" | "minutes" | "minutes60"): string {
+  if (mode === "episode") return tr("playback.sleepTimer.episode");
+  if (mode === "minutes") return tr("playback.sleepTimer.minutesShort");
+  if (mode === "minutes60") return tr("playback.sleepTimer.minutes60Short");
+  return tr("playback.sleepTimer.off");
+}
+
+function refreshPlaybackControlLabels() {
+  const speedText = "⏯ x" + Number(appSettings.playbackRate || 1).toFixed(2);
+  const speedTitle = `${tr("playback.speed")}: x${Number(appSettings.playbackRate || 1).toFixed(2)}`;
+
+  const sleepText = "⏱ " + getSleepModeLabel(appSettings.sleepTimerMode);
+  const sleepTitle = `${tr("playback.sleepTimer")}: ${getSleepModeLabel(appSettings.sleepTimerMode)}`;
+
+  const npSpeedBtn = document.getElementById("npSpeedBtn") as HTMLButtonElement | null;
+  if (npSpeedBtn) {
+    npSpeedBtn.textContent = speedText;
+    npSpeedBtn.title = speedTitle;
+  }
+
+  const miniSpeedBtn = document.getElementById("miniSpeedBtn") as HTMLButtonElement | null;
+  if (miniSpeedBtn) {
+    miniSpeedBtn.textContent = speedText;
+    miniSpeedBtn.title = speedTitle;
+  }
+
+  const npSleepBtn = document.getElementById("npSleepBtn") as HTMLButtonElement | null;
+  if (npSleepBtn) {
+    npSleepBtn.textContent = sleepText;
+    npSleepBtn.title = sleepTitle;
+    npSleepBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
+  }
+
+  const miniSleepBtn = document.getElementById("miniSleepBtn") as HTMLButtonElement | null;
+  if (miniSleepBtn) {
+    miniSleepBtn.textContent = sleepText;
+    miniSleepBtn.title = sleepTitle;
+    miniSleepBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
+  }
 }
 
 let isLoadingChapter = false;
@@ -787,6 +834,7 @@ let favoritesQueueActive = false;
 let favoritesQueueIndex = -1;
 let favoritesQueue: Array<{ itemId: string; episodeId: string; episodeTitle: string; podcastTitle: string }> = [];
 let favoritesQueueTransition = false;
+let sleepTimerStartMs: number | null = null;
 
 type OfflineStats = {
   itemCount: number;
@@ -822,7 +870,7 @@ function loadSettings(): AppSettings {
       continueAnimations: parsed?.continueAnimations !== false,
       showAuthor: parsed?.showAuthor === true,
       playbackRate: [0.75, 1.0, 1.25, 1.5, 2.0].includes(parsed?.playbackRate) ? parsed.playbackRate : DEFAULT_SETTINGS.playbackRate,
-      sleepTimerMode: ["none", "episode", "minutes"].includes(parsed?.sleepTimerMode) ? parsed.sleepTimerMode : DEFAULT_SETTINGS.sleepTimerMode,
+      sleepTimerMode: ["none", "episode", "minutes", "minutes60"].includes(parsed?.sleepTimerMode) ? parsed.sleepTimerMode : DEFAULT_SETTINGS.sleepTimerMode,
       sleepTimerMinutes: Math.max(1, Math.min(120, Number(parsed?.sleepTimerMinutes) || DEFAULT_SETTINGS.sleepTimerMinutes)),
       autoMarkPlayedOnFinish: parsed?.autoMarkPlayedOnFinish === true,
       usePlaylistOverlay: parsed?.usePlaylistOverlay !== false,
@@ -894,6 +942,8 @@ function applyTranslations() {
   if (isVisible("playlistView")) {
     void renderPlaylistPage();
   }
+
+  refreshPlaybackControlLabels();
 
   if (document.getElementById("settingsView")?.style.display !== "none") {
     renderSettingsPage();
@@ -1785,24 +1835,7 @@ function openNowPlayingPanel() {
   syncNowPlayingProgress(audio);
   setPlaybackButtons(!audio.paused);
   
-  // Initialize button texts based on current settings
-  const speedBtn = document.getElementById("npSpeedBtn");
-  if (speedBtn) {
-    speedBtn.textContent = "⏯ x" + appSettings.playbackRate.toFixed(2);
-  }
-  
-  const sleepLabels = [
-    tr("playback.sleepTimer.off"),
-    tr("playback.sleepTimer.episode"),
-    tr("playback.sleepTimer.minutes")
-  ];
-  const sleepModes = ["none", "episode", "minutes"];
-  const sleepIdx = sleepModes.indexOf(appSettings.sleepTimerMode);
-  const sleepBtn = document.getElementById("npSleepBtn");
-  if (sleepBtn) {
-    sleepBtn.textContent = "⏱ " + sleepLabels[sleepIdx];
-    sleepBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
-  }
+  refreshPlaybackControlLabels();
 }
 
 function showMiniPlayer(title:string, author:string, cover:string){
@@ -1832,24 +1865,7 @@ function showMiniPlayer(title:string, author:string, cover:string){
   const npBg = document.getElementById("npBg") as HTMLDivElement | null
   if (npBg) npBg.style.backgroundImage = `url('${resolvedCover.replace(/'/g, "\\'")}'` + ")"
 
-  // Initialize mini-player extra controls
-  const miniSpeedBtn = document.getElementById("miniSpeedBtn");
-  if (miniSpeedBtn) {
-    miniSpeedBtn.textContent = "⏯ x" + appSettings.playbackRate.toFixed(2);
-  }
-  
-  const sleepLabels = [
-    tr("playback.sleepTimer.off"),
-    tr("playback.sleepTimer.episode"),
-    tr("playback.sleepTimer.minutes")
-  ];
-  const sleepModes = ["none", "episode", "minutes"];
-  const sleepIdx = sleepModes.indexOf(appSettings.sleepTimerMode);
-  const miniSleepBtn = document.getElementById("miniSleepBtn");
-  if (miniSleepBtn) {
-    miniSleepBtn.textContent = "⏱ " + sleepLabels[sleepIdx];
-    miniSleepBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
-  }
+  refreshPlaybackControlLabels();
 }
 
 function setMsg(id: string, text: string, type: "ok" | "error" | "none" = "none") {
@@ -2263,37 +2279,24 @@ document.addEventListener("click", async (e) => {
       appSettings.playbackRate = newRate;
       saveSettings(appSettings);
       audio.playbackRate = newRate;
-      const npBtn = document.getElementById("npSpeedBtn");
-      if (npBtn) npBtn.textContent = "⏯ x" + newRate.toFixed(2);
-      const miniBtn = document.getElementById("miniSpeedBtn");
-      if (miniBtn) miniBtn.textContent = "⏯ x" + newRate.toFixed(2);
+      refreshPlaybackControlLabels();
     }
 
     if (id === "npSleepBtn" || id === "miniSleepBtn") {
-      const modes = ["none", "episode", "minutes"];
+      const modes = ["none", "episode", "minutes", "minutes60"];
       const labels = [
         tr("playback.sleepTimer.off"),
         tr("playback.sleepTimer.episode"),
-        tr("playback.sleepTimer.minutes")
+        tr("playback.sleepTimer.minutesShort"),
+        tr("playback.sleepTimer.minutes60Short")
       ];
       const currentIdx = modes.indexOf(appSettings.sleepTimerMode);
       const nextIdx = (currentIdx + 1) % modes.length;
       appSettings.sleepTimerMode = modes[nextIdx] as any;
+      sleepTimerStartMs = (appSettings.sleepTimerMode === "minutes" || appSettings.sleepTimerMode === "minutes60")
+        ? Date.now() : null;
       saveSettings(appSettings);
-      
-      const npBtn = document.getElementById("npSleepBtn");
-      if (npBtn) {
-        npBtn.textContent = "⏱ " + labels[nextIdx];
-        npBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
-      }
-      
-      const miniBtn = document.getElementById("miniSleepBtn");
-      if (miniBtn) {
-        miniBtn.textContent = "⏱ " + labels[nextIdx];
-        miniBtn.style.opacity = appSettings.sleepTimerMode === "none" ? "0.6" : "1";
-      }
-      
-      // Show a quick toast or update (can evolve UI later)
+      refreshPlaybackControlLabels();
       console.log(`Sleep timer: ${labels[nextIdx]}`);
     }
 
@@ -3074,8 +3077,15 @@ async function renderContinueListening(inProgress: any) {
     const isFavoritesCurrent = Boolean(
       currentFav &&
       String(currentFav.itemId) === String(itemId) &&
-      String(currentFav.episodeId) === String(episodeId || "")
+      (
+        String(currentFav.episodeId) === String(episodeId || "") ||
+        (String(currentItemId || "") === String(itemId) && String(currentEpisodeId || "") === String(currentFav.episodeId))
+      )
     );
+    const isFavoriteEntry = Boolean(
+      episodeId && Features.isInPlaylist(String(itemId), String(episodeId))
+    );
+    const showFavoriteBadge = isFavoritesCurrent || isFavoriteEntry;
 
     const card = document.createElement("div");
     card.className = "book-card continue-card";
@@ -3091,7 +3101,7 @@ async function renderContinueListening(inProgress: any) {
     <div class="cover-wrap">
     <img class="book-cover-bg" loading="lazy" decoding="async" alt="" aria-hidden="true">
     <img class="book-cover" loading="lazy" decoding="async">
-    ${isFavoritesCurrent ? `<span class="favorite-cover-badge" title="${escapeHtml(tr("playlist.queueBadge"))}">♥</span>` : ""}
+    ${showFavoriteBadge ? `<span class="favorite-cover-badge" title="${escapeHtml(tr("playlist.queueBadge"))}">♥</span>` : ""}
     <div class="progress-wrap">
     <div class="progress-bar"></div>
     </div>
@@ -3395,6 +3405,7 @@ async function renderPlayNextRow(
     const titleEl = card.querySelector(".book-title") as HTMLElement;
     const subEl = card.querySelector(".book-sub") as HTMLElement;
     const playBtn = card.querySelector(".continue-play-btn") as HTMLButtonElement;
+    const coverWrap = card.querySelector(".cover-wrap") as HTMLElement;
     const img = card.querySelector(".book-cover") as HTMLImageElement;
     const bgImg = card.querySelector(".book-cover-bg") as HTMLImageElement;
 
@@ -3438,6 +3449,14 @@ async function renderPlayNextRow(
 
     if (!isPodcastItem) {
       continue;
+    }
+
+    if (nextEpisodeId && Features.isInPlaylist(String(itemId), String(nextEpisodeId)) && coverWrap) {
+      const badge = document.createElement("span");
+      badge.className = "favorite-cover-badge";
+      badge.title = tr("playlist.queueBadge");
+      badge.textContent = "♥";
+      coverWrap.appendChild(badge);
     }
 
     try {
@@ -4688,6 +4707,17 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
         }
       }
 
+      // Sleep timer: episode mode - stop at episode end without advancing
+      if (appSettings.sleepTimerMode === "episode") {
+        appSettings.sleepTimerMode = "none";
+        sleepTimerStartMs = null;
+        saveSettings(appSettings);
+        refreshPlaybackControlLabels();
+        await stopPlaybackSession();
+        if (currentItemId) await maybeAutoRemoveOfflineItem(currentItemId);
+        return;
+      }
+
       const next = currentChapterIndex + 1
 
       if (next < currentFiles.length) {
@@ -4860,6 +4890,23 @@ async function playChapter(itemId: string, index: number, openNowPlaying = false
             absolute,
             isPodcast ? currentEpisodeId : null,
           ).catch(console.error)
+        }
+
+        // Sleep timer: minutes modes - stop after elapsed time
+        const sleepMode = appSettings.sleepTimerMode;
+        if (sleepMode === "minutes" || sleepMode === "minutes60") {
+          if (sleepTimerStartMs === null) {
+            sleepTimerStartMs = Date.now();
+          } else {
+            const limitMs = sleepMode === "minutes" ? 30 * 60 * 1000 : 60 * 60 * 1000;
+            if (Date.now() - sleepTimerStartMs >= limitMs) {
+              appSettings.sleepTimerMode = "none";
+              sleepTimerStartMs = null;
+              saveSettings(appSettings);
+              audio.pause();
+              refreshPlaybackControlLabels();
+            }
+          }
         }
     }
 
