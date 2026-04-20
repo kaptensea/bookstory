@@ -350,6 +350,11 @@ type UpdateState = {
   error?: string;
 };
 
+type LoginResult = {
+  username: string;
+  serverUrl: string;
+};
+
 const DEFAULT_SETTINGS: AppSettings = {
   language: "en",
   defaultSort: "recent",
@@ -377,6 +382,7 @@ const I18N: Record<AppLanguage, Record<string, string>> = {
     "login.username": "Username",
     "login.password": "Password",
     "login.signIn": "Sign in",
+    "login.sso": "Sign in with SSO",
     "sidebar.library": "Library",
     "sidebar.sort": "Sort",
     "sidebar.menu": "Menu",
@@ -742,6 +748,10 @@ function setTextIfExists(id: string, value: string) {
   if (n) n.textContent = value;
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function getSleepModeLabel(mode: "none" | "episode" | "minutes" | "minutes60"): string {
   if (mode === "episode") return tr("playback.sleepTimer.episode");
   if (mode === "minutes") return tr("playback.sleepTimer.minutesShort");
@@ -910,6 +920,7 @@ function applyTranslations() {
   setTextIfExists("usernameLabel", I18N.en["login.username"]);
   setTextIfExists("passwordLabel", I18N.en["login.password"]);
   setTextIfExists("loginBtn", I18N.en["login.signIn"]);
+  setTextIfExists("ssoLoginBtn", I18N.en["login.sso"]);
   setTextIfExists("topbarTitle", "Bookstory");
   setTextIfExists("sidebarLibraryLabel", tr("sidebar.library"));
   setTextIfExists("sidebarSortLabel", tr("sidebar.sort"));
@@ -1940,6 +1951,30 @@ async function signIn(serverUrl: string, username: string, password: string) {
   localStorage.setItem("username", username);
 }
 
+async function signInWithSso(serverUrl: string): Promise<LoginResult> {
+  const authUrl = await invoke<string>("abs_openid_start", { serverUrl });
+  await openUrl(authUrl);
+
+  const timeoutMs = 2 * 60 * 1000;
+  const startedAt = Date.now();
+
+  while ((Date.now() - startedAt) < timeoutMs) {
+    const result = await invoke<LoginResult | null>("abs_openid_complete_if_ready");
+    if (result) {
+      await invoke("abs_set_active_user", {
+        serverUrl: result.serverUrl,
+        username: result.username,
+      });
+      localStorage.setItem("serverUrl", result.serverUrl);
+      localStorage.setItem("username", result.username);
+      return result;
+    }
+    await delay(1000);
+  }
+
+  throw new Error("SSO login timed out. Please try again.");
+}
+
 async function logOut(serverUrl: string, username: string) {
   await invoke("abs_logout", { serverUrl, username });
 }
@@ -2061,6 +2096,7 @@ document.addEventListener("click", async (e) => {
     }
 
     if (id === "loginBtn") await handleLogin();
+    if (id === "ssoLoginBtn") await handleSsoLogin();
     if (id === "logoutBtn") await handleLogout();
     if (id === "playlistBtn") {
       const isPodcastLibrary = String(currentLibraryMediaType || "").toLowerCase() === "podcast";
@@ -2357,6 +2393,39 @@ async function handleLogin() {
   show(el("homeView"), true);
   show(el("miniPlayer"), true);
   await loadHome();
+}
+
+let ssoLoginInProgress = false;
+
+async function handleSsoLogin() {
+  if (ssoLoginInProgress) return;
+
+  setMsg("loginMsg", "", "none");
+  const serverUrl = normalizeUrl(el<HTMLInputElement>("server").value);
+  if (!serverUrl) return setMsg("loginMsg", "Missing server address", "error");
+  if (!isValidServerUrl(serverUrl)) return setMsg("loginMsg", "Server must be a valid http:// or https:// URL", "error");
+
+  ssoLoginInProgress = true;
+  const ssoBtn = document.getElementById("ssoLoginBtn") as HTMLButtonElement | null;
+  const loginBtn = document.getElementById("loginBtn") as HTMLButtonElement | null;
+  if (ssoBtn) ssoBtn.disabled = true;
+  if (loginBtn) loginBtn.disabled = true;
+
+  try {
+    setMsg("loginMsg", "Continue sign-in in your browser. Waiting for callback...", "ok");
+    await signInWithSso(serverUrl);
+    el<HTMLInputElement>("password").value = "";
+    show(el("loginView"), false);
+    show(el("homeView"), true);
+    show(el("miniPlayer"), true);
+    await loadHome();
+  } catch (err: any) {
+    setMsg("loginMsg", String(err?.message ?? err), "error");
+  } finally {
+    ssoLoginInProgress = false;
+    if (ssoBtn) ssoBtn.disabled = false;
+    if (loginBtn) loginBtn.disabled = false;
+  }
 }
 
 async function handleLogout() {

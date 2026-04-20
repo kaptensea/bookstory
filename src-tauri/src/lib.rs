@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use sha2::{Digest, Sha256};
 
 use axum::{
     extract::{Path, Query, State},
@@ -21,6 +23,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 const SERVICE_NAME: &str = "bookstory";
+const LOCAL_PROXY_PORT: u16 = 45873;
 
 fn normalize_server_url(mut url: String) -> String {
     url = url.trim().to_string();
@@ -38,6 +41,8 @@ pub struct ProxyState {
     pub secret: String,
     pub active_server_url: Mutex<Option<String>>,
     pub active_username: Mutex<Option<String>>,
+    pub oidc_pending: Mutex<Option<OidcPendingFlow>>,
+    pub oidc_callback: Mutex<Option<OidcCallbackPayload>>,
     pub offline_root: PathBuf,
     pub offline_index_path: PathBuf,
 }
@@ -56,6 +61,29 @@ struct HlsUrlQuery {
     k: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct OidcPendingFlow {
+    server_url: String,
+    state: String,
+    code_verifier: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OidcCallbackPayload {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OidcCallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
 /* -------------------- Keyring helpers -------------------- */
 
 fn account_key(server_url: &str, username: &str) -> String {
@@ -67,6 +95,19 @@ fn get_token_from_keyring(server_url: &str, username: &str) -> Result<String, St
     let entry = keyring::Entry::new(SERVICE_NAME, &key)
     .map_err(|e| format!("Keyring error: {}", e))?;
     entry.get_password().map_err(|e| format!("Keyring error: {}", e))
+}
+
+fn generate_random_string(len: usize) -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(len)
+        .map(char::from)
+        .collect()
+}
+
+fn pkce_code_challenge(verifier: &str) -> String {
+    let digest = Sha256::digest(verifier.as_bytes());
+    URL_SAFE_NO_PAD.encode(digest)
 }
 
 #[derive(Serialize)]
@@ -1275,6 +1316,28 @@ fn percent_encode_url(s: &str) -> String {
         .collect()
 }
 
+async fn oidc_callback_proxy(
+    State(shared): State<SharedState>,
+    Query(q): Query<OidcCallbackQuery>,
+) -> Result<Response, StatusCode> {
+    let state = &shared.0;
+    *state.oidc_callback.lock().unwrap() = Some(OidcCallbackPayload {
+        code: q.code,
+        state: q.state,
+        error: q.error,
+        error_description: q.error_description,
+    });
+
+    let html = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Bookstory SSO</title></head><body style=\"font-family:sans-serif;background:#0b1114;color:#e8f5ea;padding:24px\"><h2>Sign-in received</h2><p>You can return to Bookstory now.</p></body></html>";
+
+    let mut response = Response::new(axum::body::Body::from(html));
+    *response.status_mut() = StatusCode::OK;
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
+    Ok(response)
+}
+
 /* -------------------- Commands used by frontend -------------------- */
 
 #[tauri::command]
@@ -1339,7 +1402,10 @@ struct LoginResponse {
 
 #[derive(Deserialize)]
 struct LoginUser {
-    token: String,
+    token: Option<String>,
+    #[serde(rename = "accessToken")]
+    access_token: Option<String>,
+    username: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1347,6 +1413,10 @@ struct LoginUser {
 struct LoginResult {
     username: String,
     server_url: String,
+}
+
+fn extract_login_token(user: &LoginUser) -> Option<String> {
+    user.access_token.clone().or_else(|| user.token.clone())
 }
 
 #[tauri::command]
@@ -1371,7 +1441,8 @@ async fn abs_login_and_store(server_url: String, username: String, password: Str
     .await
     .map_err(|e| format!("Invalid server response: {}", e))?;
 
-    let token = data.user.token;
+    let token = extract_login_token(&data.user)
+        .ok_or_else(|| "Invalid server response: missing login token".to_string())?;
 
     let key = account_key(&server_url, &username);
     let entry = keyring::Entry::new(SERVICE_NAME, &key)
@@ -1379,6 +1450,157 @@ async fn abs_login_and_store(server_url: String, username: String, password: Str
     entry.set_password(&token).map_err(|e| format!("Keyring error: {}", e))?;
 
     Ok(LoginResult { username, server_url })
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn abs_openid_start(
+    state: tauri::State<'_, SharedState>,
+    server_url: String,
+) -> Result<String, String> {
+    let server_url = normalize_server_url(server_url);
+    let s = &state.0;
+
+    let redirect_uri = format!("http://127.0.0.1:{}/oidc-callback", s.port);
+    let code_verifier = generate_random_string(96);
+    let code_challenge = pkce_code_challenge(&code_verifier);
+    let state_token = generate_random_string(48);
+
+    let endpoint = format!(
+        "{}/auth/openid?code_challenge={}&code_challenge_method=S256&redirect_uri={}&client_id={}&response_type=code&state={}",
+        server_url,
+        urlencoding::encode(&code_challenge),
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode("Bookstory"),
+        urlencoding::encode(&state_token),
+    );
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let resp = client
+        .get(&endpoint)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !resp.status().is_redirection() {
+        return Err(format!(
+            "SSO start failed (HTTP {}). Verify OpenID is enabled and authOpenIDMobileRedirectURIs allows the local callback URL.",
+            resp.status()
+        ));
+    }
+
+    let location = resp
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "SSO start failed: redirect URL missing in server response".to_string())?
+        .to_string();
+
+    let auth_url = if location.starts_with("http://") || location.starts_with("https://") {
+        location
+    } else if location.starts_with('/') {
+        format!("{}{}", server_url, location)
+    } else {
+        return Err("SSO start failed: invalid redirect URL from server".to_string());
+    };
+
+    *s.oidc_pending.lock().unwrap() = Some(OidcPendingFlow {
+        server_url,
+        state: state_token,
+        code_verifier,
+    });
+    *s.oidc_callback.lock().unwrap() = None;
+
+    Ok(auth_url)
+}
+
+#[tauri::command]
+async fn abs_openid_complete_if_ready(
+    state: tauri::State<'_, SharedState>,
+) -> Result<Option<LoginResult>, String> {
+    let s = &state.0;
+
+    let pending = s
+        .oidc_pending
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "No active SSO login flow".to_string())?;
+
+    let callback_opt = s.oidc_callback.lock().unwrap().clone();
+    let callback = match callback_opt {
+        Some(cb) => cb,
+        None => return Ok(None),
+    };
+
+    if let Some(err) = callback.error {
+        *s.oidc_pending.lock().unwrap() = None;
+        *s.oidc_callback.lock().unwrap() = None;
+        let detail = callback.error_description.unwrap_or_default();
+        return Err(format!("SSO provider returned error: {} {}", err, detail).trim().to_string());
+    }
+
+    let code = callback
+        .code
+        .ok_or_else(|| "SSO callback did not include an authorization code".to_string())?;
+    let returned_state = callback
+        .state
+        .ok_or_else(|| "SSO callback did not include a state value".to_string())?;
+
+    if returned_state != pending.state {
+        *s.oidc_pending.lock().unwrap() = None;
+        *s.oidc_callback.lock().unwrap() = None;
+        return Err("SSO callback state mismatch".to_string());
+    }
+
+    let callback_url = format!(
+        "{}/auth/openid/callback?state={}&code={}&code_verifier={}",
+        pending.server_url,
+        urlencoding::encode(&returned_state),
+        urlencoding::encode(&code),
+        urlencoding::encode(&pending.code_verifier),
+    );
+
+    let resp = reqwest::Client::new()
+        .get(&callback_url)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("SSO token exchange failed (HTTP {})", resp.status()));
+    }
+
+    let data: LoginResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid server response: {}", e))?;
+
+    let token = extract_login_token(&data.user)
+        .ok_or_else(|| "Invalid server response: missing login token".to_string())?;
+    let username = data
+        .user
+        .username
+        .filter(|u| !u.trim().is_empty())
+        .ok_or_else(|| "SSO login succeeded but server did not return a username".to_string())?;
+
+    let key = account_key(&pending.server_url, &username);
+    let entry = keyring::Entry::new(SERVICE_NAME, &key)
+        .map_err(|e| format!("Keyring error: {}", e))?;
+    entry
+        .set_password(&token)
+        .map_err(|e| format!("Keyring error: {}", e))?;
+
+    *s.oidc_pending.lock().unwrap() = None;
+    *s.oidc_callback.lock().unwrap() = None;
+
+    Ok(Some(LoginResult {
+        username,
+        server_url: pending.server_url,
+    }))
 }
 
 #[tauri::command]
@@ -1993,8 +2215,12 @@ pub fn run() {
         .collect();
 
         let listener = tauri::async_runtime::block_on(async {
-            tokio::net::TcpListener::bind("127.0.0.1:0").await
-        }).expect("failed to bind localhost");
+            tokio::net::TcpListener::bind(("127.0.0.1", LOCAL_PROXY_PORT)).await
+        })
+        .map_err(|e| format!(
+            "Failed to bind localhost:{} (is another Bookstory instance running?): {}",
+            LOCAL_PROXY_PORT, e
+        ))?;
 
         let port = listener.local_addr().unwrap().port();
 
@@ -2003,6 +2229,8 @@ pub fn run() {
             secret,
             active_server_url: Mutex::new(None),
             active_username: Mutex::new(None),
+            oidc_pending: Mutex::new(None),
+            oidc_callback: Mutex::new(None),
             offline_root,
             offline_index_path,
         }));
@@ -2016,6 +2244,7 @@ pub fn run() {
             .route("/direct-audio", get(direct_audio_proxy).head(direct_audio_proxy))
             .route("/hls-manifest", get(hls_manifest_proxy))
             .route("/hls-segment", get(hls_segment_proxy))
+            .route("/oidc-callback", get(oidc_callback_proxy))
             .with_state(shared);
 
             axum::serve(listener, router)
@@ -2027,6 +2256,8 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
         abs_login_and_store,
+        abs_openid_start,
+        abs_openid_complete_if_ready,
         abs_is_logged_in,
         abs_logout,
         abs_get_libraries,

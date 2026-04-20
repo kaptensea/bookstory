@@ -10,6 +10,16 @@ export default defineConfig(async () => ({
   //
   // 1. prevent Vite from obscuring rust errors
   clearScreen: false,
+  // Pre-bundle Tauri modules up front to avoid late optimize-deps reloads at runtime.
+  optimizeDeps: {
+    include: [
+      "@tauri-apps/api/core",
+      "@tauri-apps/api/event",
+      "@tauri-apps/api/app",
+      "@tauri-apps/api/window",
+      "@tauri-apps/plugin-opener",
+    ],
+  },
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,
